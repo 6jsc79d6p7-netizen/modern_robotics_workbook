@@ -1,0 +1,43 @@
+<mujoco model="arm3r">
+  <!-- A 3R spatial open chain, used to validate our Product-of-Exponentials
+       forward kinematics (mr/se3.py) against MuJoCo's own kinematics.
+       Home position: arm stretched straight along +x, all joints at 0.
+         joint 1: revolute about z at the base origin
+         joint 2: revolute about y at (L1, 0, 0)
+         joint 3: revolute about y at (L1+L2, 0, 0)
+         end-effector site "ee" at the tip (L1+L2+L3, 0, 0)
+       Link lengths L1=0.30, L2=0.25, L3=0.20. -->
+  <option gravity="0 0 0"/>
+
+  <visual>
+    <global offwidth="960" offheight="720"/>
+    <headlight ambient="0.4 0.4 0.4" diffuse="0.6 0.6 0.6"/>
+    <!-- size of the rendered frame-axis triads (x=red, y=green, z=blue) -->
+    <scale framelength="0.6" framewidth="0.02"/>
+  </visual>
+
+  <worldbody>
+    <light pos="0.4 -0.4 1.2" dir="0 0 -1"/>
+    <camera name="cam" pos="0.45 -1.15 0.75" xyaxes="1 0 0 0 0.55 0.83"/>
+
+    <!-- world/space frame {s} marker at the origin (gets an axis triad) -->
+    <site name="world" pos="0 0 0" size="0.012" rgba="1 1 1 0.3"/>
+
+    <!-- small fixed base marker at the origin -->
+    <geom type="sphere" size="0.028" pos="0 0 0" rgba="0.3 0.3 0.3 1"/>
+
+    <body name="link1" pos="0 0 0">
+      <joint name="j1" type="hinge" axis="0 0 1"/>
+      <geom type="capsule" fromto="0 0 0 0.30 0 0" size="0.03" rgba="0.20 0.40 0.80 1"/>
+      <body name="link2" pos="0.30 0 0">
+        <joint name="j2" type="hinge" axis="0 1 0"/>
+        <geom type="capsule" fromto="0 0 0 0.25 0 0" size="0.027" rgba="0.20 0.70 0.40 1"/>
+        <body name="link3" pos="0.25 0 0">
+          <joint name="j3" type="hinge" axis="0 1 0"/>
+          <geom type="capsule" fromto="0 0 0 0.20 0 0" size="0.024" rgba="0.85 0.45 0.20 1"/>
+          <site name="ee" pos="0.20 0 0" size="0.025" rgba="1 0 0 1"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

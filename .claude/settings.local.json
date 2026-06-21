@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/opt/homebrew/bin/python3.12 -m pip --version)",
+      "Bash(/opt/homebrew/bin/python3.12 -m pip install --user numpy matplotlib jupyter)",
+      "Bash(/opt/homebrew/bin/python3.12 -m venv .venv)",
+      "Bash(.venv/bin/python -m pip install -q -U pip numpy matplotlib jupyter modern_robotics)",
+      "Bash(.venv/bin/python *)",
+      "Bash(file notes/figures/*.png)",
+      "Bash(xxd)",
+      "Bash(.venv/bin/jupyter nbconvert *)"
+    ]
+  }
+}
