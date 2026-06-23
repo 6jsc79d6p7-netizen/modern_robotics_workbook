@@ -348,6 +348,20 @@ the common engineering shortcut of **sampling `J` on a grid and interpolating**
 risky near singularities where `A⁻¹` changes fast. We'll derive the delta `J`
 properly in Ch. 7.
 
+**Q3b (consolidation from Exercise 5.3). The body Jacobian is "literally the joint
+screws in the body frame, as columns."** Each column of `J_b` is the screw axis of
+joint `i` expressed in `{b}`, evaluated at the *current* `θ` — exactly parallel to
+`J_s` (same joint screws, written in `{s}`). The only difference from `J_s` is the
+viewpoint: build a column the same way, but measure the joint's position **from the
+tip, in the tip's frame** (planar: `(1, q^b_{iy}, −q^b_{ix})`), and let the
+**outboard** joints be the ones that displace it (so the *constant* column is the
+**last**, `J_{bn}=Bₙ`, vs the *first* for space). All the `Ad`/`e^{−[Bₙ]θₙ}`
+machinery in §4 is just the bookkeeping that computes "where is joint `i`'s screw,
+in `{b}`, at this `θ`" from the home screws `Bᵢ`. Mental model: `J_s` = joint
+screws as the *world* sees them; `J_b` = the same screws as the *gripper* sees
+them; related by `J_s = [Ad_{T_{sb}}] J_b`. Use whichever matches where your data
+lives (gripper sensor/tool-frame command → body; world-frame data → space).
+
 **Q4. Frames in `τ = Jᵀ F` — does `Js` give torques "in `{s}`" and `Jb` torques
 "in `{b}`"?** No — **`τ` is frame-free.** It's a vector of per-joint scalar
 torques (one number per motor), living in joint space ℝⁿ; there's nothing to

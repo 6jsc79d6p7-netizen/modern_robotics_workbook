@@ -9,7 +9,9 @@
       "Bash(file notes/figures/*.png)",
       "Bash(xxd)",
       "Bash(.venv/bin/jupyter nbconvert *)",
-      "Bash(../../.venv/bin/python gen_05a_figures.py)"
+      "Bash(../../.venv/bin/python gen_05a_figures.py)",
+      "Bash(../../.venv/bin/python *)",
+      "Bash(.venv/bin/pip install *)"
     ]
   }
 }

@@ -19,7 +19,9 @@ Working through *Modern Robotics: Mechanics, Planning, and Control*
 | 4 | Forward Kinematics | | | ✅ done |
 | 4a | ↳ Product of Exponentials (space form) | [04a](notes/04a_forward_kinematics_space.md) | [mujoco](mujoco/) | ✅ done |
 | 4b | ↳ PoE body form + URDF | [04b](notes/04b_forward_kinematics_body.md) | [mujoco](mujoco/) | ✅ done |
-| 5 | Velocity Kinematics & Statics | | | ⬜ not started |
+| 5 | Velocity Kinematics & Statics | | | ✅ done |
+| 5a | ↳ The Jacobian (space + body) | [05a](notes/05a_jacobian_velocity_kinematics.md) | Ex 5.3 (by hand) | ✅ done |
+| 5b | ↳ Statics, singularities, manipulability | [05b](notes/05b_statics_singularities_manipulability.md) | Ex 5.3 (by hand) | ✅ done |
 | 6 | Inverse Kinematics | | | ⬜ not started |
 | 7 | Kinematics of Closed Chains | | | ⬜ not started |
 | 8 | Dynamics of Open Chains | | | ⬜ not started |
@@ -33,12 +35,22 @@ Status legend: ⬜ not started · 🟨 in progress · ✅ done
 
 ## Up next
 
-**Ch. 5 — Velocity Kinematics & Statics** — the **Jacobian** `J(θ)`: how joint
-velocities map to the end-effector twist (`V = J θ̇`), and its transpose mapping
-wrenches to joint torques (`τ = Jᵀ F`). Builds on the space/body PoE split from
-Ch. 4 (space vs body Jacobian) and the twist/wrench duality from 3b/3c. Natural
-MuJoCo follow-on: check `J` against finite-differenced FK and against MuJoCo's
-`mj_jac`.
+**Ch. 6 — Inverse Kinematics** — the inverse of Ch. 5: given a desired
+end-effector pose/twist, solve for the joint angles/rates. Newton–Raphson
+numerical IK built on the body Jacobian (`θ̇ = J⁻¹ V`, iterated), the
+**pseudo-inverse** for redundant/near-singular arms (where the parked **SVD** from
+5b finally earns its keep), and damped least squares near singularities. This is
+the "policy → EE pose → IK → joint targets" stack from the north star. Natural
+MuJoCo follow-on: numerical IK loop driving the 3R/arm to a target pose.
+
+> **Chapter 5 — complete.** Theory notes 5a (the Jacobian, space + body) / 5b
+> (statics `τ=JᵀF`, singularities, manipulability). Practiced **by hand** through
+> book **Exercise 5.3** (4R planar chain): space & body screw axes, `M`, the body
+> Jacobian, statics for two tip wrenches (incl. the `p×f` wrench-moment subtlety),
+> and a full singularity analysis (singular ⟺ joints collinear). Key intuitions
+> banked: *columns of `J` are joint screws*; *space vs body = world's view vs
+> gripper's view of the same screws*; *avoid near-singular poses, gauge by the
+> eigenvalue ratio of `A=JJᵀ`* (SVD parked → revisit as the pseudo-inverse in Ch. 6).
 
 > **Chapter 4 — complete.** Theory notes 4a (space PoE) / 4b (body PoE + URDF).
 > Practiced **hands-on in MuJoCo** (`mujoco/`): a 3R arm whose PoE forward
