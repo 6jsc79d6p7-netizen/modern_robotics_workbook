@@ -22,7 +22,9 @@ Working through *Modern Robotics: Mechanics, Planning, and Control*
 | 5 | Velocity Kinematics & Statics | | | ✅ done |
 | 5a | ↳ The Jacobian (space + body) | [05a](notes/05a_jacobian_velocity_kinematics.md) | Ex 5.3 (by hand) | ✅ done |
 | 5b | ↳ Statics, singularities, manipulability | [05b](notes/05b_statics_singularities_manipulability.md) | Ex 5.3 (by hand) | ✅ done |
-| 6 | Inverse Kinematics | | | ⬜ not started |
+| 6 | Inverse Kinematics | | | 🟨 in progress |
+| 6a | ↳ The IK problem & analytic solutions | [06a](notes/06a_inverse_kinematics_analytic.md) | — (exercises pending) | ✅ done |
+| 6b | ↳ Numerical IK (Newton–Raphson, pseudoinverse) | | | ⬜ not started |
 | 7 | Kinematics of Closed Chains | | | ⬜ not started |
 | 8 | Dynamics of Open Chains | | | ⬜ not started |
 | 9 | Trajectory Generation | | | ⬜ not started |
@@ -35,13 +37,22 @@ Status legend: ⬜ not started · 🟨 in progress · ✅ done
 
 ## Up next
 
-**Ch. 6 — Inverse Kinematics** — the inverse of Ch. 5: given a desired
-end-effector pose/twist, solve for the joint angles/rates. Newton–Raphson
-numerical IK built on the body Jacobian (`θ̇ = J⁻¹ V`, iterated), the
-**pseudo-inverse** for redundant/near-singular arms (where the parked **SVD** from
-5b finally earns its keep), and damped least squares near singularities. This is
-the "policy → EE pose → IK → joint targets" stack from the north star. Natural
-MuJoCo follow-on: numerical IK loop driving the 3R/arm to a target pose.
+**Ch. 6b — Numerical Inverse Kinematics** — 6a (analytic IK) done; next is the
+general numerical hammer. Newton–Raphson numerical IK built on the body Jacobian
+(`θ̇ = J⁻¹ V`, iterated), the **pseudo-inverse** for redundant/near-singular arms
+(where the parked **SVD** from 5b finally earns its keep), and damped least
+squares near singularities. This is the "policy → EE pose → IK → joint targets"
+stack from the north star. Natural MuJoCo follow-on: numerical IK loop driving the
+3R/arm to a target pose.
+
+> **6a — done.** Note `06a` covers the *structure* of IK (zero/finite/infinite
+> solutions from inverting a nonlinear map), the geometric 2R solve (law of
+> cosines + `atan2`, lefty/righty), the **workspace annulus**, **redundancy**
+> (with the human-arm 7-DOF analogy tying redundancy + spherical wrist together),
+> and the **spherical-wrist decoupling** for 6-DOF analytic IK (position joints
+> 1–3 / orientation joints 4–6, with a deep-dive diagram). FAQ captures the
+> `R_d`-column / wrist-center / tool-offset discussion. **Guided §6.8 exercises
+> still pending** — do these at the start of, or alongside, 6b.
 
 > **Chapter 5 — complete.** Theory notes 5a (the Jacobian, space + body) / 5b
 > (statics `τ=JᵀF`, singularities, manipulability). Practiced **by hand** through
