@@ -13,7 +13,8 @@
       "Bash(../../.venv/bin/python *)",
       "Bash(.venv/bin/pip install *)",
       "Bash(.venv/bin/pip list *)",
-      "Bash(git mv *)"
+      "Bash(git mv *)",
+      "Bash(grep -n '\\\\$\\\\$' notes/08a_open_chain_dynamics.md)"
     ]
   }
 }

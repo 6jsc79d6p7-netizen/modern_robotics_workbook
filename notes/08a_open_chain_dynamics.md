@@ -33,7 +33,9 @@ Everything in Chapter 8 is *one of two ways to read this equation*:
 
 - **Forward dynamics** — *given* the applied torque `τ` (and current `θ, θ̇`),
   solve for the resulting acceleration `θ̈`. Rearrange:
+
   $$ \ddot\theta \;=\; M(\theta)^{-1}\big(\tau - C(\theta,\dot\theta)\dot\theta - g(\theta) - f(\dot\theta)\big). $$
+
   **This is what a simulator does** — apply torques and contact forces, get
   accelerations, integrate to step the world forward. MuJoCo / Isaac *are* forward-
   dynamics engines.
@@ -115,7 +117,9 @@ Two ideas, both geometric.
 ### (a) Quadratic forms & positive-definiteness — the mass matrix is "energy"
 A **quadratic form** is `xᵀ A x` — feed a vector in twice, get a scalar out. For the
 mass matrix, the quadratic form is **kinetic energy**:
+
 $$ \text{KE} \;=\; \tfrac12\,\dot\theta^{T} M(\theta)\,\dot\theta. $$
+
 This is the matrix generalization of the scalar `½mv²`. `M` plays the role of "mass,"
 `θ̇` the role of "velocity," but because motion is multi-dimensional, "mass" is a
 matrix.
@@ -136,7 +140,9 @@ manipulability ellipsoid (5b), different physical meaning.
 Each link has a fixed **spatial inertia** in *its own* body frame (mass + a 3×3
 inertia tensor, packed into a 6×6 matrix `𝒢ᵢ` — the `<inertial>` block of a URDF).
 The mass matrix is, conceptually,
+
 $$ M(\theta) \;=\; \sum_i J_i(\theta)^{T}\, \mathcal G_i\, J_i(\theta), $$
+
 where `Jᵢ` is the Jacobian mapping joint velocities to link `i`'s twist. You've seen
 this `Jᵀ(\cdot)J` sandwich before — it's a **change of coordinates** for a quadratic
 form (like `5b`'s `JJᵀ`). The link inertias `𝒢ᵢ` are *constant*; all the `θ`-
@@ -269,6 +275,7 @@ length `L`, joint at one end, swinging in a vertical plane (a motorized pendulum
 Angle `θ` measured from straight-down.
 
 The manipulator equation collapses to a scalar:
+
 $$ \tau \;=\; \underbrace{\left(\tfrac{1}{3} m L^2\right)}_{M}\ddot\theta \;+\; \underbrace{\tfrac12 m g L \sin\theta}_{g(\theta)}. $$
 
 Read off the structure:
@@ -353,7 +360,9 @@ exactly like MuJoCo. Where the *parameters* come from, best-effort-first:
 
 **Path 2 — system identification (measure them).** For accuracy you *identify* the
 parameters. The enabling fact: **the dynamics are linear in the inertial parameters**,
+
 $$ \tau = Y(\theta,\dot\theta,\ddot\theta)\,\pi, $$
+
 where `π` stacks all the unknown masses/first-moments/inertia entries and `Y` (the
 "regressor") is built from measured motion. So: drive the robot through rich
 **exciting trajectories**, record `(θ, θ̇, θ̈)` and `τ`, and **least-squares solve**
@@ -449,12 +458,16 @@ seal the torque loop away; ODrive / Franka / industrial drives let you pick the 
 
 ### (c) Computed-torque control — feedforward the model, PD fights only linear error
 The payoff of inverse dynamics (§1). Command:
+
 $$ \tau = \underbrace{M(\theta)\ddot\theta_{des} + C(\theta,\dot\theta)\dot\theta + g(\theta)}_{\text{inverse-dynamics feedforward}} + \underbrace{M(\theta)\big(K_p e + K_d \dot e\big)}_{\text{PD on error, wrapped in }M}, \quad e = \theta_{des} - \theta. $$
+
 Plug into the real dynamics `τ = Mθ̈ + Cθ̇ + g`: the `Cθ̇ + g` cancel, the `M`
 cancels (invertible, §3), and *all* the nonlinear coupling collapses to a clean,
 **decoupled, linear, constant-coefficient** error equation — one spring-mass-damper
 per joint:
+
 $$ \boxed{\;\ddot e + K_d\,\dot e + K_p\,e = 0\;} $$
+
 So the PD never sees the nonlinear `M, C, g` — only linearized error, which means
 **one gain choice works across the whole workspace** (vs a naive PD whose effective
 plant `M(θ)⁻¹` changes with pose, so gains tuned folded go bad stretched).
@@ -480,7 +493,9 @@ forward* (master → slave), *force flows back* (slave → master).
 ### Master (delta haptic device) — render force, stay transparent
 The master must let the surgeon feel *only* the tissue, not the device. So command
 its own self-dynamics compensation (08b) **plus** the rendered wrench:
+
 $$ \tau_m = \underbrace{g_m(\theta) + C_m\dot\theta + M_m\ddot\theta}_{\text{transparency (cancel own dynamics)}} + \underbrace{J_m^{T} F_{env}}_{\text{render slave's felt wrench}} $$
+
 In practice you cleanly cancel `g_m` (+ friction); cancelling `M_m, C_m` needs `θ̈`
 (noisy, §8) so it's the hard tier — but the **delta's low, near-constant moving
 inertia** (07a §7) makes `M_m` small, so gravity-comp + `J_m^{T}F` is already
@@ -491,14 +506,18 @@ The slave receives the master's EE pose, runs **IK** → `θ_des`, and tracks it
 computed-torque control (§9c / §10). The load-bearing subtlety: **cancel `g` and
 `C`, but *use* `M`** (you can't cancel real inertia — you feedforward it and wrap the
 PD inside it):
+
 $$ \tau_s = M(\theta)\big(\ddot\theta_{des} + K_p e + K_d \dot e\big) + C\dot\theta + g, \qquad e=\theta_{des}-\theta $$
+
 which gives the clean `ë + K_d ė + K_p e = 0` error dynamics.
 
 ### Closing the loop — sensorless force estimation (the Ch. 8 payoff)
 Where does `F_env` (the wrench the master renders) come from? Either a **wrist F/T
 sensor**, or — better — **estimate it from the model**. Add the contact term
 `J_s^{T}F_{env}` to the slave's true dynamics and solve for the wrench:
+
 $$ \boxed{\;F_{env} = (J_s^{T})^{+}\big[\,\tau_{meas} - (M\ddot\theta + C\dot\theta + g)\,\big]\;} $$
+
 The bracket is the **residual**: *the part of the measured joint torque the `M,C,g`
 model can't explain must be external contact.* The robot **feels through its own
 dynamics — no force sensor needed.** (This is also how real arms do collision
