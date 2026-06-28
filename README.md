@@ -22,11 +22,16 @@ Working through *Modern Robotics: Mechanics, Planning, and Control*
 | 5 | Velocity Kinematics & Statics | | | ✅ done |
 | 5a | ↳ The Jacobian (space + body) | [05a](notes/05a_jacobian_velocity_kinematics.md) | Ex 5.3 (by hand) | ✅ done |
 | 5b | ↳ Statics, singularities, manipulability | [05b](notes/05b_statics_singularities_manipulability.md) | Ex 5.3 (by hand) | ✅ done |
-| 6 | Inverse Kinematics | | | 🟨 in progress |
-| 6a | ↳ The IK problem & analytic solutions | [06a](notes/06a_inverse_kinematics_analytic.md) | — (exercises pending) | ✅ done |
-| 6b | ↳ Numerical IK (Newton–Raphson, pseudoinverse) | | | ⬜ not started |
-| 7 | Kinematics of Closed Chains | | | ⬜ not started |
-| 8 | Dynamics of Open Chains | | | ⬜ not started |
+| 6 | Inverse Kinematics | | | ✅ done |
+| 6a | ↳ The IK problem & analytic solutions | [06a](notes/06a_inverse_kinematics_analytic.md) | Ex 6.10 (by hand) | ✅ done |
+| 6b | ↳ Numerical IK (Newton–Raphson, pseudoinverse) | [06b](notes/06b_inverse_kinematics_numerical.md) | Ex 6.10 (by hand) | ✅ done |
+| 7 | Kinematics of Closed Chains | | | ✅ done |
+| 7a | ↳ Parallel mechanisms, IK/FK, delta robot | [07a](notes/07a_closed_chains_kinematics.md) | — (design exercise) | ✅ done |
+| 7b | ↳ Differential kinematics & singularities | [07b](notes/07b_differential_kinematics_singularities.md) | — (design exercise) | ✅ done |
+| 7c | ↳ Applied: haptic teleop (delta + wrist) | [07c](notes/07c_haptic_teleop_delta.md) | — (design exercise) | ✅ done |
+| 8 | Dynamics of Open Chains | | | ✅ done |
+| 8a | ↳ Manipulator eqn, fwd/inv dynamics, Newton–Euler, contact, sim-vs-real model | [08a](notes/08a_open_chain_dynamics.md) | — (haptic teleop exercise) | ✅ done |
+| 8b | ↳ Applied: self-dynamics compensation (haptics) | [08b](notes/08b_self_dynamics_compensation.md) | — (design exercise) | ✅ done |
 | 9 | Trajectory Generation | | | ⬜ not started |
 | 10 | Motion Planning | | | ⬜ not started |
 | 11 | Robot Control | | | ⬜ not started |
@@ -37,22 +42,49 @@ Status legend: ⬜ not started · 🟨 in progress · ✅ done
 
 ## Up next
 
-**Ch. 6b — Numerical Inverse Kinematics** — 6a (analytic IK) done; next is the
-general numerical hammer. Newton–Raphson numerical IK built on the body Jacobian
-(`θ̇ = J⁻¹ V`, iterated), the **pseudo-inverse** for redundant/near-singular arms
-(where the parked **SVD** from 5b finally earns its keep), and damped least
-squares near singularities. This is the "policy → EE pose → IK → joint targets"
-stack from the north star. Natural MuJoCo follow-on: numerical IK loop driving the
-3R/arm to a target pose.
+**Ch. 9 — Trajectory Generation.** Per CLAUDE.md this is *special handling*: don't
+do a full guided-exercise pass — (1) get the gist from MR (point-to-point, time
+scaling, via points), (2) discuss the **SOTA learned replacements** (diffusion
+policy / ACT), (3) small toy examples. The value is the modern replacement, not the
+classical derivation.
 
-> **6a — done.** Note `06a` covers the *structure* of IK (zero/finite/infinite
-> solutions from inverting a nonlinear map), the geometric 2R solve (law of
-> cosines + `atan2`, lefty/righty), the **workspace annulus**, **redundancy**
-> (with the human-arm 7-DOF analogy tying redundancy + spherical wrist together),
-> and the **spherical-wrist decoupling** for 6-DOF analytic IK (position joints
-> 1–3 / orientation joints 4–6, with a deep-dive diagram). FAQ captures the
-> `R_d`-column / wrist-center / tool-offset discussion. **Guided §6.8 exercises
-> still pending** — do these at the start of, or alongside, 6b.
+> **Ch. 8 — complete** (Tier-2, conceptual; Lagrangian derivations skipped). Notes
+> 8a (core) + 8b (applied). 8a covers the manipulator equation `τ = M(θ)θ̈ +
+> C(θ,θ̇)θ̇ + g(θ) + f(θ̇)`, **forward vs inverse dynamics** (simulators vs
+> controllers), the **mass matrix** (symmetric-PD, config-dependent, inertia
+> ellipsoid), Coriolis/centrifugal, the **Newton–Euler two-sweep algorithm** (taught
+> as the outward-motion / inward-force relay picture, no algebra), **why contact
+> makes dynamics hard** (the soft-contact problem MuJoCo/Isaac exist for), and a
+> **sim-vs-real model-acquisition** section (Pinocchio/RNEA, system ID as
+> least-squares, sensing pitfalls). 8b covers **self-dynamics compensation**.
+> Practiced via a **haptic-teleop design exercise** (8a §11) instead of book
+> problems: bilateral master/slave control, the `cancel g,C / use M` computed-torque
+> law, and **sensorless force estimation** `F_env = (Jᵀ)⁺[τ_meas − (Mθ̈+Cθ̇+g)]` (the
+> residual), incl. the friction-as-phantom-force and `(Jᵀ)⁺`-vs-`J⁻¹` gotchas. Also
+> banked: the **policy→IK→controller→motor** stack and what you actually command a
+> motor (PWM→current→torque), 8a §9–10.
+
+> **Chapter 7 — complete.** Notes 7a (parallel mechanisms, the IK-easy/FK-hard
+> **duality**, loop-closure DOF counting, 3×RPR + Stewart–Gough, and a full
+> **delta-robot** treatment incl. worked IK §7a.1 with figure), 7b (the
+> **constraint Jacobian** `H q̇=0`, `q̇_p=−H_p⁻¹H_a q̇_a`, the Stewart static
+> `τ=JᵀF` shortcut, and the **three singularity types** with figure), 7c
+> (**applied haptic teleop** capstone). Practiced via a **design exercise instead
+> of book problems** — a delta+wrist haptic master for teleoperated surgery —
+> exercising `τ=JᵀF` display, `J_a` via `H`, the force/torque decoupling (delta→`f`,
+> wrist→`m`, block-antidiagonal Jacobian at grip = wrist center), space↔body
+> Jacobian conversion (adjoint of the **end-effector** pose, or build native via
+> the frame-free `H` step), and slave→master frame transport. FAQs in 7a/7b
+> capture the "if I knew the passive angles", "how is `H` compiled" (two routes +
+> dimension bookkeeping), and "real control loop / `J⁻¹` direct vs invert `J`"
+> discussions.
+
+> **Chapter 6 — complete.** Notes 6a (analytic IK: structure of solutions, the
+> geometric 2R solve, workspace annulus, redundancy, **spherical-wrist
+> decoupling**) and 6b (numerical IK: **Newton–Raphson** on the body Jacobian,
+> the **pseudo-inverse**/SVD from 5b earning its keep, **damped least squares**
+> near singularities). **Exercise 6.10 worked by hand.** This is the
+> "policy → EE pose → IK → joint targets" stack from the north star.
 
 > **Chapter 5 — complete.** Theory notes 5a (the Jacobian, space + body) / 5b
 > (statics `τ=JᵀF`, singularities, manipulability). Practiced **by hand** through

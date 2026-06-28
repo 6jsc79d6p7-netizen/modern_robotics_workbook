@@ -12,7 +12,8 @@
       "Bash(../../.venv/bin/python gen_05a_figures.py)",
       "Bash(../../.venv/bin/python *)",
       "Bash(.venv/bin/pip install *)",
-      "Bash(.venv/bin/pip list *)"
+      "Bash(.venv/bin/pip list *)",
+      "Bash(git mv *)"
     ]
   }
 }
