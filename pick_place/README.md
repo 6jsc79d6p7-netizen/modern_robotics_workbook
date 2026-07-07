@@ -103,10 +103,48 @@ Teleop now runs the full task:
 ```
 **Wrist camera view:** the loop renders the `wrist` cam (~30 Hz) and the server
 streams it as MJPEG — open `https://localhost:8443/wrist` in a browser on the Mac
-next to the sim window for the close-up grasp view. (Rendering happens in the sim
-loop guarded by `_WristStreamer`; if the offscreen GL context ever conflicts with
-the viewer it disables itself with a warning instead of crashing teleop.)
-- `teleop/static/` — the AR page (clutch toggle, gripper slider, haptics).
+next to the sim window for the close-up grasp view. The image is **rotated so
+control-forward points up** (`φ = atan2(fh·camₓ, fh·cam_y)` from the live view
+azimuth, then centre-cropped) — otherwise it spins with the gripper yaw and
+inverts your controls. Rendering is guarded by `_WristStreamer`; an offscreen-GL
+conflict disables the stream with a warning instead of crashing teleop.
+- `teleop/static/` — the AR page as a **full-screen control surface** (the camera
+  passthrough isn't needed — you watch the Mac). Shows the **objective** up top
+  (pushed by `server.push_instruction` on each reset, with late-joiner catch-up)
+  and giant **OPEN/CLOSE** + clutch + home/set-fwd buttons.
+
+## Step 5 — recording (`recorder.py`, LeRobot)
+
+`Recorder` writes teleop demos as a **LeRobot v2 dataset**. Record while teleoperating:
+```bash
+.venv/bin/mjpython -m pick_place.run_teleop --record        # → pick_place/data/pick_place
+```
+- Per timestep (~15 Hz, downsampled from 500 Hz): scene+wrist **videos**,
+  `observation.state` (ee_pos, ee_rot6d, gripper_width, joint_pos = 17),
+  `action` = base-frame **EE-delta to next pose** (Δpos, Δrot_rotvec, gripper = 7),
+  `task` = the instruction. Structured target fields → sidecar `episode_meta.jsonl`.
+- **Auto-saves on success**; the phone **✕ DISCARD** button drops a botched attempt.
+- The wrist obs is the **raw** mounted camera (not the operator-aligned live view).
+- Saves are synchronous (brief stall between episodes) so files are flushed.
+- Deps: `pip install 'lerobot[dataset]'`.
+- **Create-or-resume**: recording into an existing dataset root **appends** (so
+  scripts + teleop pool into one dataset). `rm -rf` the root to start fresh.
+- **`recorder.finalize()`** (called automatically at the end of `run_script` /
+  `run_teleop`) flushes writers — required for the dataset to be valid.
+
+### Loading the dataset (offline)
+
+```python
+from pick_place.dataset import load_dataset
+ds = load_dataset()                                   # local, no HF Hub
+ds = load_dataset(delta_timestamps={"action": [i/15 for i in range(8)]})  # (H,7) chunks
+```
+Two 0.6.0 gotchas handled by `dataset.load_dataset` / `Recorder`:
+- LeRobot only hits the Hub when the **local metadata is incomplete** — so a
+  `finalize()`d dataset loads fully offline from `root`.
+- **`video_backend="pyav"`** (default here): torchcodec (LeRobot's default
+  decoder) ships no loadable native lib on this macOS/arm setup and crashes on
+  frame reads; pyav decodes fine.
 
 ### Design notes / gotchas
 - **Franka arm actuators are position servos** (`ctrl[0:7]` = desired joint

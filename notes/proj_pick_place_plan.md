@@ -121,15 +121,43 @@ These are settled — don't relitigate without a reason.
 - [ ] Live: `mjpython -m pick_place.run_teleop` — teleop a pick→place, confirm the
       instruction, grasp chime, collision buzz, and auto-reset all fire.
 
-### Step 4 — Scripted privileged expert
-- [ ] Uses ground-truth state → grasp/lift/arc/place via-points → `ScriptSource`
-      trajectory generation → same dense `(EE-delta, gripper)` stream as teleop.
-- [ ] Validates the whole pick-place loop end-to-end with **no human in it**.
+### Step 4 — Scripted privileged expert  ✅ *done*
+- [x] `expert.py` `ScriptedExpert`: ground-truth poses → rise/over/descend/grasp
+      (gripper yawed **across** the object axis) /lift/**arc-over-wall**/place
+      waypoints → drives the same `EEController`, records via the same `Recorder`.
+- [x] `run_script.py`: headless (fast, no viewer/realtime), per-episode
+      randomization for multimodality, **auto-discards failures** (only successes
+      saved). ~**75–85%** success (box~100, cyl~90, capsule~77 — capsule is the
+      hard grasp; discard keeps the data clean).
+- [x] **Generated 100 demos** → `pick_place/data/pick_place` (8.5k frames @ 15 Hz,
+      all 6 task variants, bins balanced 50/50). Command:
+      `python -m pick_place.run_script --episodes 100`.
+- Gotcha logged: the pre-grasp must **rise then descend vertically** — a low
+      horizontal approach sweeps the open fingertips through tabletop objects
+      (knocked the long capsule most).
 
-### Step 5 — Recording pipeline (LeRobot)
-- [ ] Log the recorded tuple in **LeRobot dataset format** (parquet + mp4 +
-      episode index); both teleop and script feed it.
-- [ ] Sanity: reload a recorded episode, replay actions, confirm fidelity.
+### Step 5 — Recording pipeline (LeRobot)  🔨 *built (teleop path); pending live run*
+- [x] `recorder.py` `Recorder`: writes **LeRobot v2 (0.6.0)** — scene+wrist videos,
+      `observation.state` [ee_pos, ee_rot6d, gripper_width, joint_pos] (17),
+      `action` base-frame EE-delta-to-next-pose [Δpos, Δrot_rotvec, gripper] (7),
+      `task` = instruction. Structured target fields → sidecar `episode_meta.jsonl`.
+      See [`proj_lerobot_format.md`](proj_lerobot_format.md).
+- [x] Downsampled ~15 Hz from the 500 Hz loop; one-frame-lag for the delta action.
+- [x] Wired into `run_teleop --record`: **auto-save on success**, phone **DISCARD**
+      button to drop a botched attempt (verified it excludes the episode).
+- [x] **Offline load + merge solved**: `recorder.finalize()` (auto-called) makes
+      the dataset valid; `dataset.load_dataset()` loads locally (pyav backend, no
+      Hub); `Recorder` **create-or-resumes** so scripts + teleop pool into one
+      dataset. Verified create/resume/offline-load/action-chunking.
+- [x] **300 scripted demos generated** → 25.8k frames @ 15 Hz, all 6 variants,
+      loads offline, `(16,7)` action chunks. (bins 177/123 orange/purple — mild
+      imbalance; rebalance later if the policy shows bin bias.)
+- [ ] Live: `mjpython -m pick_place.run_teleop --record` to *append* teleop demos
+      to the same dataset (reactively, against observed policy weaknesses).
+
+### Step 6 — Train the policy  ⟵ *unblocked*
+- Offline load + action chunking confirmed. Decide policy (diffusion baseline vs
+  flow-matching), and local-Mac-MPS (validate) vs cloud GPU (real run).
 
 ### Step 6 — Data generation
 - [ ] Collect scripted-expert volume + teleop quality slice; label each episode

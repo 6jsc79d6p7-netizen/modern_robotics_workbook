@@ -30,22 +30,21 @@
     </div>
   </main>
 
-  <!-- dom-overlay drawn over the AR camera view -->
+  <!-- dom-overlay: full-screen control surface (phone camera not needed) -->
   <div id="overlay" style="display:none">
-    <div id="xrStats">–</div>
-    <div id="controls">
-      <div class="ctl leftcol">
-        <button id="clutchBtn" class="clutch off">CLUTCH&nbsp;OFF</button>
-        <div class="btnrow">
-          <button id="homeBtn" class="home">⌂ HOME</button>
-          <button id="fwdBtn" class="home">⟳ SET&nbsp;FWD</button>
-        </div>
-      </div>
-      <div id="gripWrap" class="ctl grip">
-        <button id="closeBtn" class="gripbig close">CLOSE</button>
-        <button id="openBtn" class="gripbig open">OPEN</button>
-        <input id="gripper" type="range" min="0" max="255" value="255" class="gripslider" />
-      </div>
+    <div id="topbar">
+      <div id="objective">waiting for task…</div>
+      <div id="xrStats">–</div>
+    </div>
+    <button id="clutchBtn" class="clutch off">CLUTCH&nbsp;OFF</button>
+    <div id="griprow2">
+      <button id="closeBtn" class="griphuge close">CLOSE</button>
+      <button id="openBtn" class="griphuge open">OPEN</button>
+    </div>
+    <div id="auxrow">
+      <button id="homeBtn" class="aux">⌂ HOME</button>
+      <button id="fwdBtn" class="aux">⟳ SET&nbsp;FWD</button>
+      <button id="discardBtn" class="aux discard">✕ DISCARD</button>
     </div>
   </div>
 

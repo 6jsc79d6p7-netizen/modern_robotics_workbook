@@ -31,6 +31,15 @@ class SharedState:
         self._msg = None
         self._home = False
         self._setfwd = False
+        self._instruction = ""
+
+    def set_instruction(self, text):
+        with self._lock:
+            self._instruction = text
+
+    def get_instruction(self):
+        with self._lock:
+            return self._instruction
 
     def update(self, msg):
         with self._lock:
@@ -58,6 +67,15 @@ class SharedState:
             s, self._setfwd = self._setfwd, False
             return s
 
+    def request_discard(self):
+        with self._lock:
+            self._discard = True
+
+    def take_discard_request(self):
+        with self._lock:
+            v, self._discard = getattr(self, "_discard", False), False
+            return v
+
 
 class TeleopServer:
     def __init__(self, port=8443):
@@ -82,6 +100,15 @@ class TeleopServer:
     def send_haptic(self, channel, **kw):
         """channel: 'vibrate' (phone) or 'sound' (phone beep). Thread-safe."""
         self._haptic_q.put({"type": "haptic", "channel": channel, **kw})
+
+    def send_message(self, msg):
+        """Enqueue an arbitrary dict for the phone(s). Thread-safe."""
+        self._haptic_q.put(msg)
+
+    def push_instruction(self, text):
+        """Set + broadcast the current task instruction to the phone(s)."""
+        self.state.set_instruction(text)
+        self.send_message({"type": "instruction", "text": text})
 
     def push_frame(self, jpeg):
         """Publish the latest wrist-cam JPEG for the /wrist browser view."""
@@ -157,6 +184,9 @@ class TeleopServer:
         self._clients.add(ws)
         peer = request.remote
         print(f"[teleop] phone connected ({peer})")
+        instr = self.state.get_instruction()          # catch up a late joiner
+        if instr:
+            await ws.send_str(json.dumps({"type": "instruction", "text": instr}))
         try:
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
@@ -168,6 +198,8 @@ class TeleopServer:
                         self.state.request_home()
                     elif kind == "setforward":
                         self.state.request_setfwd()
+                    elif kind == "discard":
+                        self.state.request_discard()
                 elif msg.type == WSMsgType.ERROR:
                     break
         finally:

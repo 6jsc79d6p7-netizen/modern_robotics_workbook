@@ -109,12 +109,13 @@ def _emit_haptics(server, events):
             server.send_haptic("sound", freq=660, ms=90)
 
 
-def run_teleop(server):
+def run_teleop(server, record=False, repo_id="local/pick_place", root=None, fps=15):
     import mujoco.viewer
     env = PickPlaceEnv()
     model, data, info = env.model, env.data, env.info
     instruction = env.reset()
     print(f'\n[task] {instruction}')
+    server.push_instruction(instruction)
     controller = EEController(model, info)
     controller.reset(data)
     source = TeleopSource(server)
@@ -122,11 +123,31 @@ def run_teleop(server):
     collisions = CollisionMonitor(model)
     success_ticks = 0
     wrist = _WristStreamer(model, info, server)
+
+    recorder = None
+    record_every = 1
+    if record:
+        from .recorder import Recorder, DEFAULT_ROOT
+        recorder = Recorder(env, repo_id=repo_id, root=root or DEFAULT_ROOT, fps=fps)
+        recorder.start_episode(instruction)
+        record_every = max(1, round((1.0 / model.opt.timestep) / fps))
+        print(f'[rec] recording to {recorder.root} @ {fps} Hz (every {record_every} steps)')
+
+    def _new_episode(tag):
+        nonlocal instruction
+        instruction = env.reset()
+        print(f'[task] {tag}: {instruction}')
+        server.push_instruction(instruction)
+        controller.reset(data)
+        source.reset(model, data, info)
+        if recorder:
+            recorder.start_episode(instruction)
     try:
         viewer_cm = mujoco.viewer.launch_passive(model, data)
     except RuntimeError as e:
         raise SystemExit(f"{e}\nRun under mjpython: .venv/bin/mjpython -m pick_place.run_teleop")
-    with viewer_cm as viewer:
+    try:
+      with viewer_cm as viewer:
         viewer.opt.geomgroup[4] = 1        # show the target marker third-person only
         tick = 0
         while viewer.is_running():
@@ -137,24 +158,38 @@ def run_teleop(server):
             _update_marker(model, data, info, cmd)
             mujoco.mj_step(model, data)
             _emit_haptics(server, collisions.poll(data))
+            if recorder and tick % record_every == 0:
+                recorder.record_step(data, cmd.gripper)
             if tick % WRIST_EVERY == 0:
                 wrist.push(data, viewer.cam.azimuth)
             tick += 1
 
-            # auto-reset once the target object has settled in the target bin
+            # DISCARD: abandon the current attempt without saving
+            if server.state.take_discard_request():
+                if recorder:
+                    recorder.discard_episode()
+                _new_episode("discarded → new")
+                success_ticks = 0
+
+            # auto-save + reset once the target object has settled in the target bin
             success_ticks = success_ticks + 1 if env.success() else 0
             if success_ticks >= SUCCESS_HOLD:
                 server.send_haptic("sound", freq=880, ms=250)   # success chime
-                instruction = env.reset()
-                print(f'[task] done ✓  next: {instruction}')
-                controller.reset(data)
-                source.reset(model, data, info)
+                if recorder:
+                    color, shape = env.env.obj_desc[env.target_obj]
+                    recorder.save_episode(color, shape,
+                                          env.env.bin_desc[env.target_bin],
+                                          success=True, source="teleop")
+                _new_episode("done ✓ next")
                 success_ticks = 0
 
             viewer.sync()
             dt = model.opt.timestep - (time.time() - tic)
             if dt > 0:
                 time.sleep(dt)
+    finally:
+        if recorder:
+            recorder.finalize()          # flush writers → dataset valid + loadable
 
 
 def main():
@@ -162,6 +197,10 @@ def main():
     ap.add_argument("--validate", action="store_true",
                     help="print the phone stream without running the sim")
     ap.add_argument("--port", type=int, default=PORT)
+    ap.add_argument("--record", action="store_true", help="record demos (LeRobot)")
+    ap.add_argument("--repo-id", default="local/pick_place")
+    ap.add_argument("--root", default=None, help="dataset dir (default pick_place/data/pick_place)")
+    ap.add_argument("--fps", type=int, default=15, help="recording rate")
     args = ap.parse_args()
 
     server = TeleopServer(port=args.port)
@@ -171,7 +210,8 @@ def main():
         if args.validate:
             run_validate(server)
         else:
-            run_teleop(server)
+            run_teleop(server, record=args.record, repo_id=args.repo_id,
+                       root=args.root, fps=args.fps)
     except KeyboardInterrupt:
         print("\nbye")
 

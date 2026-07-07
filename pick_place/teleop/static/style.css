@@ -19,42 +19,36 @@ main { padding: 8px 16px 40px; display: flex; flex-direction: column; gap: 12px;
 .dot { width: 10px; height: 10px; border-radius: 50%; background: #8b949e; }
 .dot.on { background: #3fb950; }
 
-/* --- AR dom-overlay --- */
-#overlay { position: fixed; inset: 0; pointer-events: none; }
-#xrStats {
-  position: absolute; top: 12px; left: 12px; right: 12px; pointer-events: none;
-  font: 13px/1.4 -apple-system, system-ui, sans-serif; color: #fff;
-  text-shadow: 0 1px 3px rgba(0,0,0,.85);
+/* --- AR dom-overlay: full-screen control surface (camera passthrough hidden) --- */
+#overlay {
+  position: fixed; inset: 0; pointer-events: auto;   /* opaque; absorbs stray taps */
+  background: #0d1117; display: flex; flex-direction: column;
+  gap: 10px; padding: 10px; box-sizing: border-box;
 }
-#controls {
-  position: absolute; bottom: 22px; left: 0; right: 0;
-  display: flex; align-items: flex-end; justify-content: space-between;
-  gap: 16px; padding: 0 18px; pointer-events: none;
+#topbar { display: flex; flex-direction: column; gap: 4px; }
+#objective {
+  font: 800 26px/1.2 -apple-system, system-ui, sans-serif; color: #fff;
+  background: #1f2733; border-radius: 12px; padding: 14px 16px; text-align: center;
 }
-.ctl { pointer-events: auto; }             /* taps here don't leak to XR select */
-.leftcol { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
-.btnrow { display: flex; gap: 8px; }
-.home {
-  padding: 10px 20px; border: 0; border-radius: 999px;
-  font: 700 14px -apple-system, system-ui, sans-serif;
-  background: rgba(210,153,34,.9); color: #fff;
-}
+#xrStats { font: 12px/1.3 -apple-system, system-ui, sans-serif; color: #7d8590;
+           text-align: center; }
 .clutch {
-  padding: 16px 26px; border: 0; border-radius: 999px;
-  font: 700 16px -apple-system, system-ui, sans-serif; color: #fff;
+  flex: 2; border: 0; border-radius: 16px; color: #fff;
+  font: 800 26px -apple-system, system-ui, sans-serif; letter-spacing: 1px;
 }
-.clutch.off { background: rgba(0,0,0,.6); color: #8b949e; }
-.clutch.on  { background: rgba(63,185,80,.9); }
-.grip {
-  background: rgba(0,0,0,.5); border-radius: 16px; padding: 10px;
-  display: flex; flex-direction: column; gap: 10px; align-items: stretch;
+.clutch.off { background: #21262d; color: #8b949e; }
+.clutch.on  { background: rgba(63,185,80,.95); }
+#griprow2 { flex: 5; display: flex; gap: 10px; }
+.griphuge {
+  flex: 1; border: 0; border-radius: 18px; color: #fff;
+  font: 900 40px -apple-system, system-ui, sans-serif; letter-spacing: 2px;
 }
-.gripbig {
-  border: 0; border-radius: 14px; color: #fff;
-  font: 800 22px -apple-system, system-ui, sans-serif;
-  padding: 22px 40px; min-width: 150px; letter-spacing: 1px;
+.griphuge.close { background: rgba(210,60,50,.95); }
+.griphuge.open  { background: rgba(46,140,60,.95); }
+.griphuge:active, .clutch:active { filter: brightness(1.35); }
+#auxrow { display: flex; gap: 10px; }
+.aux {
+  flex: 1; padding: 14px; border: 0; border-radius: 12px; color: #fff;
+  font: 700 15px -apple-system, system-ui, sans-serif; background: rgba(210,153,34,.9);
 }
-.gripbig.close { background: rgba(210,60,50,.95); }
-.gripbig.open  { background: rgba(46,140,60,.95); }
-.gripbig:active { filter: brightness(1.3); }
-.gripslider { width: 100%; height: 26px; }
+.aux.discard { background: rgba(120,40,40,.9); }

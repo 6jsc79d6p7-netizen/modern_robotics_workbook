@@ -25,6 +25,7 @@ function connect() {
   ws.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === "haptic") playHaptic(m);
+    else if (m.type === "instruction") $("objective").textContent = m.text;
   };
 }
 
@@ -67,9 +68,13 @@ function wireControls() {
     // point the phone the way you want "into the screen", then tap
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "setforward" }));
   });
-  $("gripper").addEventListener("input", (e) => { gripper = +e.target.value; });
-  $("openBtn").addEventListener("click", (e) => { e.stopPropagation(); gripper = 255; $("gripper").value = 255; });
-  $("closeBtn").addEventListener("click", (e) => { e.stopPropagation(); gripper = 0; $("gripper").value = 0; });
+  $("discardBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "discard" }));
+    setClutch(false);
+  });
+  $("openBtn").addEventListener("click", (e) => { e.stopPropagation(); gripper = 255; });
+  $("closeBtn").addEventListener("click", (e) => { e.stopPropagation(); gripper = 0; });
 }
 
 async function startAR() {
