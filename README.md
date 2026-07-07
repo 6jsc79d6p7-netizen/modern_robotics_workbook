@@ -32,8 +32,9 @@ Working through *Modern Robotics: Mechanics, Planning, and Control*
 | 8 | Dynamics of Open Chains | | | ✅ done |
 | 8a | ↳ Manipulator eqn, fwd/inv dynamics, Newton–Euler, contact, sim-vs-real model | [08a](notes/08a_open_chain_dynamics.md) | — (haptic teleop exercise) | ✅ done |
 | 8b | ↳ Applied: self-dynamics compensation (haptics) | [08b](notes/08b_self_dynamics_compensation.md) | — (design exercise) | ✅ done |
-| 9 | Trajectory Generation | | | ⬜ not started |
-| 10 | Motion Planning | | | ⬜ not started |
+| 9 | Trajectory Generation | [09](notes/09_trajectory_generation.md) | toys (planned) | 🟨 theory done |
+| 9–10 | ↳ Learned SOTA (combined) | [09_10s](notes/09_10_learned_sota.md) | toys (planned) | 🟨 theory done |
+| 10 | Motion Planning | [10](notes/10_motion_planning.md) | toys (planned) | 🟨 theory done |
 | 11 | Robot Control | | | ⬜ not started |
 | 12 | Grasping & Manipulation | | | ⬜ not started |
 | 13 | Wheeled Mobile Robots | | | ⬜ not started |
@@ -42,11 +43,32 @@ Status legend: ⬜ not started · 🟨 in progress · ✅ done
 
 ## Up next
 
-**Ch. 9 — Trajectory Generation.** Per CLAUDE.md this is *special handling*: don't
-do a full guided-exercise pass — (1) get the gist from MR (point-to-point, time
-scaling, via points), (2) discuss the **SOTA learned replacements** (diffusion
-policy / ACT), (3) small toy examples. The value is the modern replacement, not the
-classical derivation.
+**Ch. 9 & 10 — theory notes done; toy examples next.** Per CLAUDE.md these are
+*special handling* (gist + SOTA + toy). We taught **9 and 10's SOTA together**
+(user's call — the learned methods dissolve the Ch9/Ch10 boundary). Three notes:
+- [09](notes/09_trajectory_generation.md) — classical trajectory-gen gist (path ×
+  time scaling; joint/task/SE(3) straight lines; cubic/quintic/trapezoid/S-curve
+  jerk ladder; via points; the `(s,ṡ)` phase-plane time-optimal picture).
+- [10](notes/10_motion_planning.md) — classical motion-planning gist (the
+  piano-mover's problem; **C-space obstacles**; A\*; grid/sampling(RRT,RRT\*,PRM)/
+  potential-field/optimization taxonomy; completeness ladder).
+- [09_10s](notes/09_10_learned_sota.md) — **keystone SOTA note**: the
+  classical→learned spectrum (classical+TOPP → cuRobo → MπNets → **ACT/Diffusion
+  Policy** → **VLA**), action chunking, multimodality, the **VLN/semantic-nav**
+  branch, and what MR substrate survives underneath (this is the Phase-0→robot-
+  learning bridge).
+
+**PIVOT — now building the practical project, not toy examples.** Ch 9–10 theory
+(+ rich FAQ) is done; **Ch 11/12/13 are deferred.** Next is a real
+**MuJoCo pick-and-place build** toward the north star (roadmap M1→M2→M3): scripted
+privileged-state expert **+ human teleop** demos → conditioned **flow-matching**
+policy (Rung 4) → **π0** (Rung 5). Decisions: **Franka Panda**, **cloud GPU** for
+the CUDA parts (cuRobo/AnyGrasp/training/π0 — none run on the Mac), **phased**
+(env + data on the Mac first), and a **walled-bin planning challenge** in the place
+phase. First concrete piece: the **phone 6-DoF teleop** data interface —
+[`proj_phone_teleop.md`](notes/proj_phone_teleop.md) (also the best hands-on Ch-3
+SE(3)/transform-tree exercise). NB: rebuilding `.venv` dropped MuJoCo — reinstall
+`mujoco` + `mujoco_menagerie` when Phase 0 starts.
 
 > **Ch. 8 — complete** (Tier-2, conceptual; Lagrangian derivations skipped). Notes
 > 8a (core) + 8b (applied). 8a covers the manipulator equation `τ = M(θ)θ̈ +

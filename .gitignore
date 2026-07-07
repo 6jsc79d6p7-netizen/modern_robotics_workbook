@@ -1,3 +1,8 @@
 MR.pdf
 .venv/*
 *.pyc
+__pycache__/
+mujoco_menagerie/
+pick_place/out/
+pick_place/teleop/certs/
+.DS_Store

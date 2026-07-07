@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>pick_place · teleop</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>pick_place · phone teleop</h1>
+    <div class="sub">Streams the phone's ARKit/ARCore 6-DoF pose (hardware VIO) to the robot. Watch the arm on your Mac screen.</div>
+  </header>
+  <main>
+    <div class="panel">
+      <span class="status"><span id="dot" class="dot"></span><span id="state">connecting…</span></span>
+    </div>
+    <div class="panel">
+      <button id="startBtn" class="btn" disabled>Start AR session</button>
+      <div class="muted" id="support" style="margin-top:10px">checking WebXR support…</div>
+      <div class="muted" style="margin-top:10px">
+        Android Chrome works out of the box. iPhone Safari needs WebXR flags
+        (Settings → Apps → Safari → Advanced → Feature Flags).
+      </div>
+    </div>
+    <div class="panel muted">
+      In the AR view: <b>CLUTCH</b> toggles whether your motion drives the robot
+      (tap to engage, move, tap to freeze &amp; reposition — the ratchet). The
+      <b>gripper</b> slider opens/closes the hand.
+    </div>
+  </main>
+
+  <!-- dom-overlay drawn over the AR camera view -->
+  <div id="overlay" style="display:none">
+    <div id="xrStats">–</div>
+    <div id="controls">
+      <div class="ctl leftcol">
+        <button id="clutchBtn" class="clutch off">CLUTCH&nbsp;OFF</button>
+        <div class="btnrow">
+          <button id="homeBtn" class="home">⌂ HOME</button>
+          <button id="fwdBtn" class="home">⟳ SET&nbsp;FWD</button>
+        </div>
+      </div>
+      <div id="gripWrap" class="ctl grip">
+        <button id="closeBtn" class="gripbig close">CLOSE</button>
+        <button id="openBtn" class="gripbig open">OPEN</button>
+        <input id="gripper" type="range" min="0" max="255" value="255" class="gripslider" />
+      </div>
+    </div>
+  </div>
+
+  <script src="/teleop.js"></script>
+</body>
+</html>
