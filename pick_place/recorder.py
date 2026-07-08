@@ -24,9 +24,13 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 from mr.so3 import matrix_log3
 from .scene import tcp_pose
+from .env import CAMERAS, render_obs
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_ROOT = os.path.join(HERE, "data", "pick_place")
+# 2-camera + target-highlight-mask dataset (kept separate so the original
+# 3-camera data stays intact). Point run_script/train/infer at this.
+MASK_ROOT = os.path.join(HERE, "data", "pick_place_masked")
 
 STATE_NAMES = (["ee_x", "ee_y", "ee_z"] + [f"rot6d_{i}" for i in range(6)]
                + ["gripper_width"] + [f"joint{i}" for i in range(1, 8)])
@@ -37,14 +41,12 @@ def _features(img_hw):
     h, w = img_hw
     vid = {"dtype": "video", "shape": (h, w, 3),
            "names": ["height", "width", "channels"]}
-    return {
-        "observation.images.scene": dict(vid),
-        "observation.images.wrist": dict(vid),
-        "observation.state": {"dtype": "float32", "shape": (len(STATE_NAMES),),
-                              "names": STATE_NAMES},
-        "action": {"dtype": "float32", "shape": (len(ACTION_NAMES),),
-                   "names": ACTION_NAMES},
-    }
+    feats = {key: dict(vid) for key, _ in CAMERAS}
+    feats["observation.state"] = {"dtype": "float32", "shape": (len(STATE_NAMES),),
+                                  "names": STATE_NAMES}
+    feats["action"] = {"dtype": "float32", "shape": (len(ACTION_NAMES),),
+                       "names": ACTION_NAMES}
+    return feats
 
 
 class Recorder:
@@ -56,6 +58,9 @@ class Recorder:
         self.img_hw = img_hw
         self.root = root
         self.renderer = mujoco.Renderer(self.model, height=img_hw[0], width=img_hw[1])
+        # second renderer in segmentation mode → per-pixel geom ids for the mask
+        self.seg_renderer = mujoco.Renderer(self.model, height=img_hw[0], width=img_hw[1])
+        self.seg_renderer.enable_segmentation_rendering()
         fj = [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, n)
               for n in ("finger_joint1", "finger_joint2")]
         self.finger_qadr = [self.model.jnt_qposadr[j] for j in fj if j >= 0]
@@ -122,18 +127,16 @@ class Recorder:
 
     # ---- feature extraction ----
     def _observe(self, data):
-        self.renderer.update_scene(data, camera="scene")
-        scene = self.renderer.render().copy()
-        self.renderer.update_scene(data, camera="wrist")     # RAW mounted view
-        wrist = self.renderer.render().copy()
+        obs = {}
+        keep = self.env.target_keep_geoms()                  # target obj + target bin
+        for key, cam in CAMERAS:
+            obs[key] = render_obs(self.renderer, self.seg_renderer, data, cam, keep).copy()
         p, R = tcp_pose(self.model, data, self.info)
         rot6d = R[:, :2].T.reshape(6)                        # 6D rotation rep
         gw = float(sum(data.qpos[a] for a in self.finger_qadr))
         jp = data.qpos[self.info.arm_qpos_ids]
-        state = np.concatenate([p, rot6d, [gw], jp]).astype(np.float32)
-        return ({"observation.images.scene": scene,
-                 "observation.images.wrist": wrist,
-                 "observation.state": state}, (p, R))
+        obs["observation.state"] = np.concatenate([p, rot6d, [gw], jp]).astype(np.float32)
+        return obs, (p, R)
 
     def _delta(self, pose0, pose1, gripper):
         (p0, R0), (p1, R1) = pose0, pose1

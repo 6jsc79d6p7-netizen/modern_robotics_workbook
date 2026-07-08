@@ -3,7 +3,20 @@
 Language-conditioned pick-and-place build (repo north star). Full plan &
 checklist: [`../notes/proj_pick_place_plan.md`](../notes/proj_pick_place_plan.md).
 
-## Status — Step 1 done: EE-pose target-follower
+## Status
+
+| Step | State |
+|---|---|
+| 1 controller + viewer | ✅ EE-pose follower (IK + rate limiter) |
+| 2 phone WebXR teleop | ✅ clutched relative mapping, haptics, wrist view |
+| 3 pick-place env | ✅ objects/bins, instructions, success/reset |
+| 4 scripted expert | ✅ **300 demos generated** |
+| 5 recording (LeRobot) | ✅ offline load + resume/merge + source tags |
+| 6 data generation | ✅ 300 scripted (teleop-augment ready) |
+| 7 training (smolvla) | 🔨 trains on Mac MPS |
+| 8 inference rollout | ✅ deploy loop built |
+
+## Step 1 — EE-pose target-follower
 
 A Franka Panda in MuJoCo that follows an end-effector target pose, driven by a
 swappable `TargetSource`. This is the controller substrate every later data
@@ -131,6 +144,8 @@ conflict disables the stream with a warning instead of crashing teleop.
   scripts + teleop pool into one dataset). `rm -rf` the root to start fresh.
 - **`recorder.finalize()`** (called automatically at the end of `run_script` /
   `run_teleop`) flushes writers — required for the dataset to be valid.
+- **Source tags**: each episode's sidecar records `source` (`script`|`teleop`) so
+  you can weight/filter the teleop quality slice vs scripted volume at train time.
 
 ### Loading the dataset (offline)
 
@@ -142,9 +157,79 @@ ds = load_dataset(delta_timestamps={"action": [i/15 for i in range(8)]})  # (H,7
 Two 0.6.0 gotchas handled by `dataset.load_dataset` / `Recorder`:
 - LeRobot only hits the Hub when the **local metadata is incomplete** — so a
   `finalize()`d dataset loads fully offline from `root`.
-- **`video_backend="pyav"`** (default here): torchcodec (LeRobot's default
-  decoder) ships no loadable native lib on this macOS/arm setup and crashes on
-  frame reads; pyav decodes fine.
+- **Video decode backend**: torchcodec (LeRobot's default) needs a *system*
+  FFmpeg — `brew install ffmpeg` (it doesn't bundle one, unlike pyav). With
+  ffmpeg present it works and is the default; pass `video_backend="pyav"` for the
+  self-contained fallback (no system dependency, slightly slower).
+
+## Step 4 — scripted privileged expert (`expert.py`, `run_script.py`)
+
+`ScriptedExpert` reads ground-truth object/bin poses and plans a pick→place as
+waypoint segments — **rise → over-object → descend → grasp → lift → arc over the
+bin wall → release** — driving the *same* `EEController` and recording via the
+*same* `Recorder`. Runs headless (no viewer/realtime), so it's fast; failures are
+**auto-discarded** (only successes saved). Per-episode randomization (heights,
+grasp yaw, drop) injects multimodality.
+
+```bash
+# measure success rate only:
+.venv/bin/python -m pick_place.run_script --episodes 20 --dry-run
+# record N successful demos (auto-resumes an existing dataset):
+.venv/bin/python -m pick_place.run_script --episodes 300
+```
+- ~75–85% success (box ~100, cylinder ~90, **capsule ~77** — the hard grasp).
+- Grasp gotcha: the gripper is **yawed across** an object's axis (the capsule can
+  only be grasped perpendicular to its long axis), and the approach **rises then
+  descends vertically** — a low horizontal approach sweeps the open fingertips
+  through tabletop objects and knocks them.
+- ⚠ It uses waypoints + the controller's **rate limiter** for interpolation, *not*
+  real trajectory generation (no time-scaling / screw motion). Fine for data;
+  smoother demos would want a Ch-9 trajgen layer.
+
+## Step 6 — training (`smolvla`, LeRobot)
+
+**Policy = `smolvla`** — a small **language-conditioned flow-matching VLA**
+(SmolVLM-500M + flow action expert), i.e. a mini-π0. Vanilla Diffusion Policy in
+LeRobot has *no* language encoding, so it can't do the conditioned task; language
+conditioning ⇒ a flow-matching VLA.
+
+```bash
+pip install 'lerobot[dataset,training,smolvla]'   # + brew install ffmpeg (for torchcodec)
+lerobot-train --dataset.repo_id=local/pick_place \
+  --dataset.root=pick_place/data/pick_place \
+  --policy.path=lerobot/smolvla_base --policy.device=mps --policy.push_to_hub=false \
+  --policy.optimizer_lr=1e-5 \
+  --batch_size=4 --steps=10000 --save_freq=2000 --num_workers=0 \
+  --wandb.enable=false --output_dir=outputs/smolvla_finetune
+```
+- **Trains on Mac MPS** (verified; ~1.2 s/step). Cloud = same with
+  `--policy.device=cuda`, bigger batch/steps.
+- **Finetune `smolvla_base`** (pretrained expert) — needs the dataset to use its
+  3-camera names (`camera1/2/3`); our env/recorder now produce those (`CAMERAS` in
+  `env.py`). Use `--policy.type=smolvla` instead to train the expert from scratch.
+- **`--policy.optimizer_lr=1e-5`**: the default `1e-4` *diverges* when finetuning
+  the pretrained (cross-embodiment) expert on a small batch — lower it.
+- Video decode uses **torchcodec** by default (`brew install ffmpeg`); add
+  `--dataset.video_backend=pyav` for the self-contained fallback.
+
+## Step 8 — inference rollout (`run_infer.py`)
+
+Runs a trained checkpoint in the sim. Deploy loop: build obs (render scene+wrist,
+17-d state, instruction) → `preprocessor → policy.select_action → postprocessor`
+→ **integrate the EE-delta** onto the current pose → same `EEController` → step.
+
+```bash
+# watch it (macOS → mjpython), on a decent checkpoint:
+.venv/bin/mjpython -m pick_place.run_infer --viz live
+# headless success rate (CPU avoids fighting an MPS training run):
+.venv/bin/python -m pick_place.run_infer --viz none --device cpu --episodes 10 \
+  --checkpoint outputs/smolvla_pickplace/checkpoints/last/pretrained_model
+```
+- **The policy has no 'done' signal** — it's reactive. Episodes terminate on
+  `env.success()` (privileged ground truth) or `--max-decisions` timeout; after
+  success the policy would just hover/drift (out-of-distribution).
+- Decisions run at ~15 Hz (each EE-delta applied over ~33 sim steps); smolvla
+  re-plans its 50-step action chunk internally.
 
 ### Design notes / gotchas
 - **Franka arm actuators are position servos** (`ctrl[0:7]` = desired joint

@@ -155,23 +155,103 @@ These are settled — don't relitigate without a reason.
 - [ ] Live: `mjpython -m pick_place.run_teleop --record` to *append* teleop demos
       to the same dataset (reactively, against observed policy weaknesses).
 
-### Step 6 — Train the policy  ⟵ *unblocked*
-- Offline load + action chunking confirmed. Decide policy (diffusion baseline vs
-  flow-matching), and local-Mac-MPS (validate) vs cloud GPU (real run).
+### Step 6 — Data generation  ✅ *scripted done; teleop ready*
+- [x] **300 scripted-expert demos** → one LeRobot dataset (source-tagged `script`,
+      all 6 variants, bins 177/123).
+- [ ] Teleop **quality slice** appended reactively (`run_teleop --record`
+      auto-resumes the dataset, tags `teleop`); fix the script/teleop mix against
+      observed policy weaknesses (~10–20% teleop is plenty).
 
-### Step 6 — Data generation
-- [ ] Collect scripted-expert volume + teleop quality slice; label each episode
-      with its instruction. Fix the mix ratio here.
+### Step 7 — Train the policy  🔨 *smolvla on Mac MPS*
+- **Policy = `smolvla`** (SmolVLM-500M + flow-matching action expert): the small,
+  **language-conditioned** flow-matching VLA — a mini-π0. Chosen because vanilla
+  Diffusion Policy in LeRobot **ignores language** (0 text encoding), so it can't
+  do our conditioned task; language conditioning ⇒ a flow-matching VLA.
+- **Verified smolvla trains on MPS** (loss 3.5→1.85 by step 200, ~1.06 s/step @ batch 4).
+- Setup gotchas (all handled): extras `pip install 'lerobot[dataset,training,smolvla]'`;
+  `--dataset.video_backend=pyav`; finetuning `lerobot/smolvla_base` fails on a
+  **camera-name/count mismatch** (base expects camera1/2/3, we have scene/wrist) →
+  `--policy.type=smolvla` (adapts to our 2 cameras) or `--rename_map`.
+- **Run:**
+  ```
+  lerobot-train --dataset.repo_id=local/pick_place \
+    --dataset.root=pick_place/data/pick_place --dataset.video_backend=pyav \
+    --policy.type=smolvla --policy.device=mps --policy.push_to_hub=false \
+    --batch_size=4 --steps=10000 --save_freq=2000 --num_workers=0 \
+    --wandb.enable=false --output_dir=outputs/smolvla_pickplace
+  ```
+  Cloud = same, `--policy.device=cuda` + bigger batch/steps (+ finetune smolvla_base).
+- [ ] Watch loss; test a checkpoint at inference (Step 8).
 
-### Step 7 — Train the policy
-- [ ] Train a conditioned flow-matching / diffusion policy on the LeRobot dataset
-      (GPU / cloud).
-
-### Step 8 — Inference
-- [ ] Run the trained policy in the sim; display it executing from a language
-      instruction.
+### Step 8 — Inference  🔨 *deploy loop built; awaiting a trained checkpoint*
+- [x] `run_infer.py`: load policy+processors from a checkpoint → per decision
+      build obs (render cams + 17-d state + instruction) →
+      `preprocessor → select_action → postprocessor` → **integrate EE-delta** onto
+      the current pose → same `EEController`. `--viz live` (mjpython) or headless.
+      Pipeline validated on the step-2k checkpoint (runs clean; places nothing yet).
+- **No policy 'done' signal** — reactive; WE terminate on `env.success()` (GT) or
+  a `--max-decisions` timeout. Post-success behaviour is OOD (hover/drift).
+- [ ] Run `--viz live` on a later checkpoint; measure success rate; check it
+      actually *reads the instruction* (same scene, different target → different
+      action). If it ignores language / is brittle → more steps, or add teleop.
 
 ---
+
+### Step 8.5 — grounding diagnosis → mask pivot  🔨 *data path built; retrain pending*
+- **Finding (DiT, 3-cam, CLIP-text conditioning):** `run_infer --probe-language`
+  (same scene, vary only the instruction) → **0/3 reached the named object**.
+  Language *shifts* behaviour (3 different endpoints) but grounding is ~random,
+  and the arm never gets closer than ~10 cm to any object. Root cause: 300 demos
+  can't teach language→object **spatial grounding** on a from-scratch head over
+  CLIP features. This is the checkpoint's ceiling, not a deploy-loop knob.
+- **Two paths:** (a) end-to-end **smolvla** (pretrained VLM *supplies* grounding),
+  or (b) **factor grounding out of the policy** — resolve the target *outside* the
+  net and hand the DiT an already-grounded view. Pursuing (b) first as a clean
+  ablation ("is the DiT's *control* fine and only grounding broken?").
+- **Chosen (b): dimmed-RGB target mask + 2 cameras.**
+  - Cut cameras 3→2 (`scene` third-person + `wrist`); dropped the redundant
+    `front` view (CLIP×3cams×2obs was the batch bottleneck; fewer dims = better at
+    300 demos). `front` camera stays in the model, just off the obs list.
+  - On the `scene` view only, **dim everything except the target object + target
+    bin** (`env.dim_except`, MuJoCo segmentation, `MASK_DIM=0.35`); wrist stays
+    clean for the grasp. Grounding is privileged (sim seg) now; the *same* mask
+    channel comes from SAM / Grounding-DINO on hardware → sim→real transfers.
+  - New dataset root **`pick_place/data/pick_place_masked`** (original 3-cam data
+    left intact). Recorder + `run_infer` apply the identical mask (train/deploy
+    parity). `--probe-language` now varies the *highlight*, not the sentence.
+- **Deploy-loop knob also added:** `--n-action-steps` (default 8; trained 24) —
+  execute fewer chunk actions open-loop before re-observing (reactivity).
+- [ ] Regenerate ~300 masked demos → retrain DiT (`outputs/dit_flow_masked`) →
+      re-run `--probe-language`. Success signal: **0/3 → ~3/3**. If it grounds,
+      the control stack was fine all along and grounding was the whole problem.
+
+### Step 8.6 — deploy-loop bug: measured-pose vs running-reference integration  ✅ *fixed*
+- **Symptom:** DiT, smolvla, AND ACT all trained to low loss (ACT 8.8→0.38) yet
+  *every* policy failed at deploy the same way — a tell that the fault is **below
+  the model**, in the shared deploy loop, not the net.
+- **Decisive diagnostic — `pick_place/replay_gt.py`:** feed the scripted expert's
+  *own* ground-truth EE-delta stream through the exact deploy loop.
+  - GT expert: **5/6** success. `openloop_drift = 0.0 mm` (Σdeltas reconstructs the
+    path exactly — the action representation is perfect; **no compounding error**).
+  - **measured-pose integration (old `run_infer`): 0/6**, tracking error 126–247 mm
+    and *growing*.
+  - **running-reference integration (fix): 5/6**, error 14–28 mm and *constant* —
+    matches GT exactly.
+- **Root cause:** the position servo trails its command by a ~constant lag *L*
+  (that's what `EEController.q_ref`/`cmd_pos` exist to decouple). `_integrate`
+  rebuilt each target as `measured_TCP + delta`; since `measured_TCP` already lags
+  by *L*, the lag is **re-injected every decision and compounds** to `k·L`. The
+  expert never hit this — it commanded *absolute distant waypoints*.
+- **Fix (`run_infer.py`, both `rollout` + `probe_language`):** seed a running
+  reference at the start pose and integrate each delta **onto the reference**
+  (`ref ← ref ⊕ delta`), not onto the measured TCP. Arm then trails by a constant,
+  in-tolerance ~15–28 mm. This is the standard delta-action deployment pattern.
+- **Reframes Step 8.5:** the 0/3 grounding verdict was measured through the broken
+  loop, so it's **not trustworthy** — re-run `--probe-language` on the fixed loop
+  before concluding anything about grounding. Control was likely fine all along.
+- *Open item:* pure running-reference never re-syncs to measured, so a genuinely
+  stuck arm (contact/unreachable) would let the reference run away. Add gentle
+  re-sync only if that shows up; not needed for free-space motion.
 
 ## MR learning payoff (why this build *is* the curriculum)
 

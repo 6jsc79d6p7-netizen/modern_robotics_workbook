@@ -52,6 +52,48 @@ BIN_WALL_T = 0.01
 BIN_WALL_H = 0.06                      # tall enough that a straight-line place clips it
 BINS = list(BIN_COLORS.keys())
 
+# dataset image-feature keys → MuJoCo camera names. Two views: one third-person
+# (scene) + the wrist cam — the standard minimal-and-sufficient manipulation rig.
+# (A 3rd fixed view was dropped: redundant with `scene`, and 3 CLIP passes/cam was
+#  the training batch-size bottleneck. The `front` camera stays in the model.)
+CAMERAS = [("observation.images.camera1", "scene"),
+           ("observation.images.camera2", "wrist")]
+
+# ---- target-grounding mask -----------------------------------------------
+# Instead of asking the policy to learn language→object grounding from few demos,
+# we hand it an ALREADY-GROUNDED view: on the external (scene) camera, everything
+# except the target object + target bin is dimmed, so the target visually pops.
+# The grounding is privileged (MuJoCo segmentation) in sim; on hardware the same
+# highlight would come from SAM / Grounding-DINO. The wrist cam is left clean
+# (full context for the grasp). See notes/proj_pick_place_plan.md.
+MASKED_CAMS = {"scene"}
+MASK_DIM = 0.35                        # non-target pixels scaled to 35% brightness
+
+
+def dim_except(img, seg, keep_geom_ids, dim=MASK_DIM):
+    """Darken every pixel whose segmented geom id is not in `keep_geom_ids`.
+    `seg` is a MuJoCo segmentation render (H,W,2); channel 0 = geom id, bg = -1."""
+    keep = np.isin(seg[..., 0], np.asarray(list(keep_geom_ids)))
+    out = img.astype(np.float32)
+    out[~keep] *= dim
+    return out.astype(np.uint8)
+
+
+def render_obs(rgb, seg, data, cam, keep_geoms):
+    """Render one camera to uint8 (H,W,3). On masked cams, dim all but the target
+    AND disable shadows: the arm shadows the object during the grasp approach,
+    which would drag the 'kept' target darker than the dimmed background and
+    invert the highlight. Non-masked cams (wrist) keep shadows for realism.
+    Shared by the recorder and the deploy loop so train/deploy stay identical."""
+    masked = cam in MASKED_CAMS
+    rgb.update_scene(data, camera=cam)
+    rgb.scene.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = 0 if masked else 1
+    im = rgb.render()
+    if masked:
+        seg.update_scene(data, camera=cam)
+        im = dim_except(im, seg.render(), keep_geoms)
+    return im
+
 # reachable sampling region on the table top (x forward, y left)
 REGION_X = (0.40, 0.64)
 REGION_Y = (-0.28, 0.28)
@@ -100,6 +142,7 @@ class EnvInfo:
     obj_desc: list            # (color, shape) per object
     bin_mocap: list           # mocap id per bin
     bin_desc: list            # color name per bin
+    bin_geoms: list           # geom ids per bin (floor + walls) — for the mask
 
 
 class PickPlaceEnv:
@@ -135,9 +178,12 @@ class PickPlaceEnv:
         for color in BINS:
             self._add_bin(wb, f"bin_{color}", BIN_COLORS[color])
 
-        # cameras (Step 4 observations)
+        # cameras (observations) — 3 views to match smolvla_base's camera1/2/3
         C, T = np.array([0.5, -0.75, 1.0]), np.array([0.5, 0.0, TABLE_TOP])
         wb.add_camera(name="scene", pos=C, xyaxes=_look_at(C, T), fovy=50)
+        Cf = np.array([1.35, 0.0, 0.70])                  # front, looking back at table
+        wb.add_camera(name="front", pos=Cf,
+                      xyaxes=_look_at(Cf, np.array([0.5, 0.0, TABLE_TOP + 0.05])), fovy=52)
         hand = spec.body("hand")
         hand.add_camera(name="wrist", pos=[0, 0, 0.03],
                         xyaxes=[1, 0, 0, 0, -1, 0], fovy=70)
@@ -162,13 +208,16 @@ class PickPlaceEnv:
         def bid(n): return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, n)
         def gid(n): return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, n)
         obj_bodies = [bid(f"obj{i}") for i in range(len(OBJECTS))]
+        bin_bodies = [bid(f"bin_{c}") for c in BINS]
         env = EnvInfo(
             obj_bodies=obj_bodies,
             obj_qadr=[model.jnt_qposadr[model.body_jntadr[b]] for b in obj_bodies],
             obj_geoms=[gid(f"obj{i}") for i in range(len(OBJECTS))],
             obj_desc=list(OBJECTS),
-            bin_mocap=[model.body_mocapid[bid(f"bin_{c}")] for c in BINS],
+            bin_mocap=[model.body_mocapid[b] for b in bin_bodies],
             bin_desc=list(BINS),
+            bin_geoms=[[g for g in range(model.ngeom) if model.geom_bodyid[g] == b]
+                       for b in bin_bodies],
         )
         return model, base, env
 
@@ -239,6 +288,13 @@ class PickPlaceEnv:
                 else:
                     pts.append(p); kinds.append(kind)     # give up, accept last
         return pts
+
+    # ---- grounding mask ----
+    def target_keep_geoms(self):
+        """Geom ids to keep bright on the masked view: the target object + its
+        target bin. Privileged (sim) grounding; the mask means the same thing at
+        deploy, so on hardware these come from a detector instead."""
+        return [self.env.obj_geoms[self.target_obj], *self.env.bin_geoms[self.target_bin]]
 
     # ---- success ----
     def obj_pos(self, i):
