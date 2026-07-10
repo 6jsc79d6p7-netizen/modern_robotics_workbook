@@ -40,7 +40,7 @@ DEFAULT_CKPT = "outputs/dit_flow_masked/checkpoints/last/pretrained_model"
 
 def load_policy(ckpt, device, n_action_steps=None, dataset_root=MASK_ROOT,
                 temporal_ensemble_coeff=None, noise_scheduler_type=None,
-                num_inference_steps=None):
+                num_inference_steps=None, num_integration_steps=None, fp16=False):
     from lerobot.configs.policies import PreTrainedConfig
     from lerobot.policies.factory import make_policy, make_pre_post_processors
     cfg = PreTrainedConfig.from_pretrained(ckpt)
@@ -56,6 +56,16 @@ def load_policy(ckpt, device, n_action_steps=None, dataset_root=MASK_ROOT,
     if noise_scheduler_type is not None:
         print(f"[infer] sampler -> {noise_scheduler_type} "
               f"({num_inference_steps or 'default'} steps)")
+    # flow-matching-only (multi_task_dit objective=flow_matching): the sampler
+    # takes `num_integration_steps` euler steps, each a FULL denoiser forward pass.
+    # Trained default 100 → ~590 ms/chunk on MPS and it dominates deploy latency;
+    # flow matching stays accurate at ~10-20 steps (100→10 ≈ 4.7x faster, ~126 ms).
+    # Read at sample time from config, so this is a pure deploy knob, no retrain.
+    if num_integration_steps is not None and hasattr(cfg, "num_integration_steps"):
+        trained_steps = cfg.num_integration_steps
+        cfg.num_integration_steps = num_integration_steps
+        print(f"[infer] num_integration_steps -> {num_integration_steps} "
+              f"(flow matching; trained {trained_steps})")
     # How many chunk actions to execute open-loop before re-observing. The DiT
     # trains with n_action_steps=24 (of a 32-horizon) — a LOT of blind motion for
     # a task that needs visual servoing. Lower it (~8) to re-look ~3x as often;
@@ -72,6 +82,8 @@ def load_policy(ckpt, device, n_action_steps=None, dataset_root=MASK_ROOT,
         cfg.n_action_steps = n_action_steps
     ds = load_dataset(root=dataset_root)                  # for feature shapes + stats
     policy = make_policy(cfg=cfg, ds_meta=ds.meta)
+    if num_integration_steps is not None and hasattr(policy.config, "num_integration_steps"):
+        policy.config.num_integration_steps = num_integration_steps   # in case make_policy re-read it
     if n_action_steps is not None:
         policy.config.n_action_steps = n_action_steps     # in case make_policy re-read it
         # chunk length is `horizon` on the DiT, `chunk_size` on ACT.
@@ -80,6 +92,21 @@ def load_policy(ckpt, device, n_action_steps=None, dataset_root=MASK_ROOT,
         te = f", temporal_ensemble={temporal_ensemble_coeff}" if temporal_ensemble_coeff else ""
         print(f"[infer] n_action_steps -> {n_action_steps} (chunk {chunk}){te}")
     policy.eval()
+    if fp16:
+        # Run the denoiser/encoder forward passes in fp16 (the DP UNet is 256M
+        # params → compute-bound, ~1.4x on MPS). autocast keeps the scheduler
+        # math + norm stats in fp32; we cast the action back to fp32 so the
+        # (fp32) postprocessor un-normalizer matches. Deploy knob, no retrain.
+        dev_type = "cuda" if str(device).startswith("cuda") else str(device)
+        _orig_select = policy.select_action
+
+        def _select_fp16(batch, *a, **k):
+            with torch.autocast(device_type=dev_type, dtype=torch.float16):
+                out = _orig_select(batch, *a, **k)
+            return out.float() if torch.is_tensor(out) else out
+
+        policy.select_action = _select_fp16
+        print(f"[infer] fp16 autocast on ({dev_type})")
     pre, post = make_pre_post_processors(
         policy_cfg=cfg, pretrained_path=ckpt,
         preprocessor_overrides={"device_processor": {"device": device}})
@@ -113,6 +140,178 @@ def _integrate(ee_p, ee_R, action):
     theta = np.linalg.norm(drot)
     Rd = matrix_exp3(drot / theta, theta) if theta > 1e-8 else np.eye(3)
     return ee_p + dpos, Rd @ ee_R, grip
+
+
+def _gen_chunk(policy, pre, post, obs_list):
+    """Generate ONE full action chunk (un-normalized, base-frame EE-deltas).
+
+    `obs_list` is the last `n_obs_steps` *consecutive* observations (one decision
+    apart). We feed them through the policy's own obs-history queue exactly like
+    select_action does (pop ACTION so populate_queues doesn't push a None into the
+    action queue; stack the per-camera images into OBS_IMAGES), then call
+    predict_action_chunk to sample the whole chunk in one shot. Returns (L, adim)
+    where L = horizon - (n_obs_steps-1) *iff* the caller widened
+    policy.config.n_action_steps to the horizon (rollout_chunked does), so there's
+    an overlap tail beyond the executed actions for the RTC boundary blend.
+
+    Only the producer thread calls this, so it is the sole owner of policy._queues.
+    """
+    from lerobot.utils.constants import ACTION, OBS_IMAGES
+    from lerobot.policies.utils import populate_queues
+    b = None
+    for ob in obs_list:
+        b = dict(pre(ob))
+        b.pop(ACTION, None)
+        if policy.config.image_features:
+            b[OBS_IMAGES] = torch.stack(
+                [b[k] for k in policy.config.image_features], dim=-4)
+        policy._queues = populate_queues(policy._queues, b)
+    chunk = policy.predict_action_chunk(b)                    # (1, L, adim) normalized
+    return np.stack([post(chunk[:, t]).squeeze(0).float().detach().cpu().numpy()
+                     for t in range(chunk.shape[1])])
+
+
+def rollout_chunked(env, policy, pre, post, controller, renderer, seg_renderer, finger_qadr,
+                    device, max_decisions=160, sim_per_decision=33, rtc_overlap=0,
+                    on_step=None, record_path=None, record_cam="scene"):
+    """Chunk-granularity pipeline (the right async design when sample ≫ per-decision
+    sim, i.e. the ratio that makes the per-action `--async-infer` need lookahead ≈ a
+    whole chunk). While the arm executes the current chunk's `n_action_steps`
+    actions, a background thread generates the NEXT full chunk from a fresh 2-frame
+    observation taken at chunk start. Because one chunk executes in
+    n_action_steps · T_dec while a sample takes ~one sample-time, the next chunk is
+    ready before the current one is consumed → the sample latency is hidden with
+    exactly ONE chunk of obs-staleness (deterministic, no jitter).
+
+    Two wins vs the sync/per-action loops:
+      1. renders only the `n_obs_steps` frames the policy actually consumes per
+         chunk (sync renders every decision but evicts all but the last 2 before
+         each generation — ~14/16 wasted).
+      2. overlaps generation with execution on a background thread.
+
+    `rtc_overlap` > 0 enables an RTC-style soft boundary: the first `rtc_overlap`
+    actions of the new chunk are crossfaded with the overlapping tail the previous
+    chunk already predicted (horizon > n_action_steps), ramping new-chunk weight
+    0→1 so the fresh-but-stale plan doesn't snap the arm's velocity at the seam.
+    """
+    model, data, info = env.model, env.data, env.info
+    instruction = env.reset()
+    keep = env.target_keep_geoms()
+    controller.reset(data)
+    policy.reset()
+    ref_p, ref_R = tcp_pose(model, data, info)
+    rec = _VideoRec(model, record_cam) if record_path else None
+    n_obs = int(policy.config.n_obs_steps)
+    na = int(policy.config.n_action_steps)                   # actions to EXECUTE per chunk
+    H = int(getattr(policy.config, "horizon",
+                    getattr(policy.config, "chunk_size", na)))
+    policy.config.n_action_steps = H                         # widen slice → keep the RTC tail
+    print(f"[infer] task: {instruction}  (chunk-pipeline exec={na} horizon={H} "
+          f"n_obs={n_obs} rtc_overlap={rtc_overlap})")
+
+    def observe():
+        obs = _images(renderer, seg_renderer, data, keep)
+        obs["observation.state"] = torch.from_numpy(
+            _state(model, data, info, finger_qadr))[None]
+        obs["task"] = [instruction]
+        return obs
+
+    def exec_action(a):
+        nonlocal ref_p, ref_R
+        tp, tR, grip = _integrate(ref_p, ref_R, a)
+        ref_p, ref_R = tp, tR
+        cmd = TargetCommand(pos=tp, R=tR, gripper=grip)
+        _update_marker(model, data, info, cmd)
+        for _ in range(sim_per_decision):
+            controller.step(data, cmd)
+            mujoco.mj_step(model, data)
+            env.track()
+            if rec is not None:
+                rec.maybe(data)
+            if on_step:
+                on_step()
+
+    # background producer: sole owner of policy state (no races)
+    req = {"obs": None}
+    out = {"chunk": None}
+    have_req, have_chunk, stop = threading.Event(), threading.Event(), threading.Event()
+    err = {}
+
+    def producer():
+        try:
+            while not stop.is_set():
+                if not have_req.wait(timeout=0.1):
+                    continue
+                have_req.clear()
+                with torch.no_grad():
+                    out["chunk"] = _gen_chunk(policy, pre, post, req["obs"])
+                have_chunk.set()
+        except Exception as e:
+            err["e"] = e
+            stop.set()
+            have_chunk.set()
+
+    worker = threading.Thread(target=producer, daemon=True)
+    worker.start()
+
+    def request(obs_list):
+        req["obs"] = obs_list
+        have_chunk.clear()
+        have_req.set()
+
+    def await_chunk():
+        while not have_chunk.wait(timeout=0.1):
+            if stop.is_set():
+                raise RuntimeError(f"producer died: {err.get('e')}")
+        if out["chunk"] is None:
+            raise RuntimeError(f"producer died: {err.get('e')}")
+        return out["chunk"]
+
+    # bootstrap: n_obs consecutive frames (hold pose so they differ by one decision) → first chunk
+    boot = []
+    for _ in range(n_obs):
+        boot.append(observe())
+        exec_action(np.zeros(7))                             # zero delta = hold; advances sim one decision
+    request(boot)
+    cur = await_chunk()
+
+    won = False
+    k = 0
+    try:
+        while k < max_decisions and not stop.is_set():
+            obs_list, prev = [], cur
+            for i in range(na):
+                if k >= max_decisions:
+                    break
+                if i < n_obs:                                # render only the frames the policy consumes
+                    obs_list.append(observe())
+                exec_action(cur[i])
+                k += 1
+                if i == n_obs - 1:                           # kick next chunk from fresh consecutive frames
+                    request(obs_list)
+                if env.success():
+                    won = True
+                    break
+            if won or k >= max_decisions:
+                break
+            nxt = await_chunk()
+            if rtc_overlap > 0:                              # RTC soft boundary
+                m = min(rtc_overlap, len(nxt), max(0, len(prev) - na))
+                for i in range(m):
+                    w = (i + 1) / (m + 1)
+                    nxt[i] = (1 - w) * prev[na + i] + w * nxt[i]
+            cur = nxt
+    finally:
+        stop.set()
+        worker.join(timeout=1.0)
+        policy.config.n_action_steps = na                    # restore (we widened it for the tail)
+    if won:
+        print(f"[infer] SUCCESS at decision {k - 1}")
+    else:
+        print("[infer] timeout — not placed")
+    if rec is not None:
+        rec.save(record_path, won)
+    return won
 
 
 class _VideoRec:
@@ -368,6 +567,15 @@ def main():
     ap.add_argument("--num-inference-steps", type=int, default=None,
                     help="diffusion denoising steps (DDIM ~10; DDPM ~100 = "
                          "num_train_timesteps). Fewer = faster, rougher.")
+    ap.add_argument("--num-integration-steps", type=int, default=None,
+                    help="flow-matching (multi_task_dit) euler steps per chunk. "
+                         "Trained default 100 ≈ 590 ms/chunk on MPS and dominates "
+                         "latency; 10-20 is usually as accurate (100->10 ≈ 4.7x "
+                         "faster). Deploy-time knob, no retraining.")
+    ap.add_argument("--fp16", action="store_true",
+                    help="run the policy forward passes in fp16 autocast "
+                         "(~1.4x on MPS for the 256M-param DP UNet; scheduler + "
+                         "norm stats stay fp32). Deploy knob, no retraining.")
     ap.add_argument("--async-infer", action="store_true",
                     help="run inference in a background thread so it overlaps sim "
                          "stepping (removes the move-stop stutter of slow samplers). "
@@ -376,6 +584,15 @@ def main():
                     help="async only: actions the producer runs ahead. Small (1-3) "
                          "= fresher obs = accuracy≈sync; larger = smoother but the "
                          "policy plans on staler obs and overshoots.")
+    ap.add_argument("--chunk-pipeline", action="store_true",
+                    help="chunk-granularity async: generate the NEXT full chunk on a "
+                         "bg thread while executing the current one (one chunk of "
+                         "obs-staleness, no jitter). Renders only n_obs_steps frames "
+                         "per chunk. Right design when sample-time ≈ chunk-exec-time.")
+    ap.add_argument("--rtc-overlap", type=int, default=0, metavar="N",
+                    help="chunk-pipeline only: RTC soft boundary — crossfade the first "
+                         "N actions of each new chunk with the previous chunk's "
+                         "overlapping tail (needs horizon>n_action_steps). 0 = off.")
     ap.add_argument("--record", action="store_true",
                     help="save a clean third-person MP4 per episode (for a README/demo); "
                          "filename gets _ok/_fail so you can grab a successful one.")
@@ -408,15 +625,24 @@ def main():
                                     dataset_root=args.dataset_root,
                                     temporal_ensemble_coeff=args.temporal_ensemble,
                                     noise_scheduler_type=args.scheduler,
-                                    num_inference_steps=args.num_inference_steps)
+                                    num_inference_steps=args.num_inference_steps,
+                                    num_integration_steps=args.num_integration_steps,
+                                    fp16=args.fp16)
 
     if args.probe_language:
         probe_language(env, policy, pre, post, controller, renderer, seg_renderer,
                        finger_qadr)
         return
 
-    roll = rollout_async if args.async_infer else rollout
-    extra = {"lookahead": args.async_lookahead} if args.async_infer else {}
+    if args.chunk_pipeline:
+        roll = rollout_chunked
+        extra = {"rtc_overlap": args.rtc_overlap}
+    elif args.async_infer:
+        roll = rollout_async
+        extra = {"lookahead": args.async_lookahead}
+    else:
+        roll = rollout
+        extra = {}
 
     def run_all(on_step=None):
         wins = 0
