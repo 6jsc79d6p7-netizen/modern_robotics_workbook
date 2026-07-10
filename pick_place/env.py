@@ -52,6 +52,22 @@ BIN_WALL_T = 0.01
 BIN_WALL_H = 0.06                      # tall enough that a straight-line place clips it
 BINS = list(BIN_COLORS.keys())
 
+# An object counts as PLACED only if it was actually PICKED UP at some point —
+# lifted at least this far above the table. Without it, success() collapses to
+# "object xy inside the bin footprint", which a knocked/rolled object satisfies
+# WITHOUT ever being grasped: that false-positive poisoned ~15% of the scripted
+# dataset with empty-gripper "placements" (the exact deploy failure mode). The
+# per-episode max lift height is accumulated by track(); see success().
+LIFT_MARGIN = 0.10
+
+# Finger width below this = the gripper is closed on NOTHING (missed grasp) or has
+# DROPPED the object mid-carry. A clean grasp pins the fingers at the object width
+# (~0.03-0.05); an empty close / slip lets them snap toward 0. held_cleanly() uses
+# the per-episode MIN width to reject drops that lift-tracking alone lets through
+# (object was lifted, then slipped out and luckily fell into the bin). Matches the
+# audit_dataset default --grip-thresh so the save gate and the audit agree.
+EMPTY_GRIP_WIDTH = 0.015
+
 # dataset image-feature keys → MuJoCo camera names. Two views: one third-person
 # (scene) + the wrist cam — the standard minimal-and-sufficient manipulation rig.
 # (A 3rd fixed view was dropped: redundant with `scene`, and 3 CLIP passes/cam was
@@ -154,6 +170,11 @@ class PickPlaceEnv:
         self.target_bin = 0
         self.instruction = ""
         self.bin_xy = np.zeros((len(BINS), 2))
+        self._max_obj_z = None            # per-episode max lift height (see track())
+        self._min_grip_width = np.inf     # per-episode min finger width (see track())
+        fj = [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, n)
+              for n in ("finger_joint1", "finger_joint2")]
+        self._finger_qadr = [self.model.jnt_qposadr[j] for j in fj if j >= 0]
 
     # ---- model construction ----
     def _build(self):
@@ -267,6 +288,9 @@ class PickPlaceEnv:
         mujoco.mj_forward(self.model, d)
         for _ in range(60):                     # settle objects onto the table
             mujoco.mj_step(self.model, d)
+        # seed the lift tracker at the settled resting heights; track() grows it
+        self._max_obj_z = self.data.xpos[self.env.obj_bodies][:, 2].copy()
+        self._min_grip_width = np.inf     # track() shrinks it toward the grasp width
         return self.instruction
 
     def _sample_layout(self, n_bins, n_obj):
@@ -300,13 +324,44 @@ class PickPlaceEnv:
     def obj_pos(self, i):
         return self.data.xpos[self.env.obj_bodies[i]].copy()
 
+    def track(self):
+        """Accumulate each object's max height reached this episode. MUST be
+        called every sim step of any loop that uses success()/grasp_verified()
+        (data collection AND deploy/eval), so those checks can require the target
+        was genuinely lifted rather than knocked into the bin footprint."""
+        if self._max_obj_z is None:
+            self._max_obj_z = self.data.xpos[self.env.obj_bodies][:, 2].copy()
+        else:
+            np.maximum(self._max_obj_z,
+                       self.data.xpos[self.env.obj_bodies][:, 2],
+                       out=self._max_obj_z)
+        w = float(sum(self.data.qpos[a] for a in self._finger_qadr))
+        self._min_grip_width = min(self._min_grip_width, w)
+
+    def grasp_verified(self):
+        """True iff the target object was actually picked up (lifted clear of the
+        table) at some point this episode. Requires track() to have been run."""
+        return bool(self._max_obj_z is not None and
+                    self._max_obj_z[self.target_obj] > TABLE_TOP + LIFT_MARGIN)
+
+    def held_cleanly(self):
+        """True iff the gripper never went (near-)empty this episode — it didn't
+        miss the grasp OR drop the object mid-carry. Complements grasp_verified():
+        lift says 'was picked up', this says 'was held the whole way'. Use as an
+        extra SAVE gate for demos; NOT part of eval success (a slippy-but-placed
+        rollout still counts as a task success)."""
+        return bool(self._min_grip_width > EMPTY_GRIP_WIDTH)
+
     def success(self):
-        """True when the TARGET object is settled inside the TARGET bin."""
+        """True when the TARGET object is settled inside the TARGET bin AND was
+        actually grasped to get there. The lift requirement rejects the
+        knocked/rolled-in false positives that reduced the old check to a pure
+        xy-proximity test (see LIFT_MARGIN)."""
         p = self.obj_pos(self.target_obj)
         bx, by = self.bin_xy[self.target_bin]
         inside_xy = abs(p[0] - bx) < BIN_INNER and abs(p[1] - by) < BIN_INNER
         inside_z = TABLE_TOP < p[2] < TABLE_TOP + BIN_WALL_H
-        return bool(inside_xy and inside_z)
+        return bool(inside_xy and inside_z and self.grasp_verified())
 
     # ---- rendering ----
     def render(self, cam="scene", w=640, h=480):

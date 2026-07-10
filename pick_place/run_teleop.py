@@ -34,7 +34,7 @@ def banner(server):
     print("-" * 60)
     print(f"  Phone (WebXR): https://{server.ip}:{server.port}/")
     print(f"  (this Mac)   : https://localhost:{server.port}/")
-    print(f"  Wrist cam    : https://localhost:{server.port}/wrist   (open on the Mac)")
+    print(f"  Wrist cam    : shown in the phone AR view; also https://localhost:{server.port}/wrist (Mac)")
     print("  Accept the self-signed cert warning once, then Start AR.")
     print("  CLUTCH toggles motion; gripper slider opens/closes the hand.")
     print("-" * 60)
@@ -157,6 +157,7 @@ def run_teleop(server, record=False, repo_id="local/pick_place", root=None, fps=
             controller.step(data, cmd)
             _update_marker(model, data, info, cmd)
             mujoco.mj_step(model, data)
+            env.track()                        # lift height for success()/grasp_verified()
             _emit_haptics(server, collisions.poll(data))
             if recorder and tick % record_every == 0:
                 recorder.record_step(data, cmd.gripper)
@@ -179,7 +180,10 @@ def run_teleop(server, record=False, repo_id="local/pick_place", root=None, fps=
                     color, shape = env.env.obj_desc[env.target_obj]
                     recorder.save_episode(color, shape,
                                           env.env.bin_desc[env.target_bin],
-                                          success=True, source="teleop")
+                                          success=True,
+                                          grasp_verified=env.grasp_verified(),
+                                          held_cleanly=env.held_cleanly(),
+                                          source="teleop")
                 _new_episode("done ✓ next")
                 success_ticks = 0
 

@@ -48,6 +48,15 @@ def build_script(args):
     base64-encoded before it touches RunPod's (unescaped) GraphQL dockerArgs."""
     train = POLICY_ARGS[args.policy].format(batch=args.batch)
     out_repo = args.out_repo or f"{args.dataset_repo}-{args.policy}"
+    # Drop contaminated episodes by training on the complement. The whole script
+    # is base64'd, so the long bracketed list is safe here (no shell escaping).
+    episodes = ""
+    if args.exclude:
+        excl = {int(x) for x in args.exclude.split(",") if x.strip()}
+        if not args.total:
+            raise SystemExit("--exclude requires --total (#episodes in the dataset)")
+        keep = [i for i in range(args.total) if i not in excl]
+        episodes = f" --dataset.episodes='[{','.join(map(str, keep))}]'"
     ve = "/opt/lr"  # RunPod's pytorch image is py3.11; lerobot 0.6.0 needs >=3.12.
     # uv gives us a standalone py3.12 + a fresh CUDA torch (PyPI default), so we
     # stay on the known-good deploying image instead of chasing a py3.12 tag.
@@ -65,7 +74,7 @@ def build_script(args):
         # huggingface-cli -> hf CLI churn that aborted the boot under `set -e`.
         "export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True",
         (f"{ve}/bin/lerobot-train --dataset.repo_id={args.dataset_repo} --policy.device=cuda "
-         f"{train} --steps={args.steps} --save_freq={args.steps // 5} "
+         f"{train}{episodes} --steps={args.steps} --save_freq={args.steps // 5} "
          "--num_workers=8 --log_freq=100 --wandb.enable=false "
          f"--policy.push_to_hub=true --policy.repo_id={out_repo} "
          "--save_checkpoint_to_hub=true --output_dir=/workspace/out"),
@@ -83,10 +92,15 @@ def build_command(args):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset-repo", required=True, help="<you>/pick_place on the Hub")
+    ap.add_argument("--dataset-repo", default=None, help="<you>/pick_place on the Hub "
+                    "(required to launch; not needed for --list-gpus)")
     ap.add_argument("--out-repo", default=None,
                     help="Hub repo to push the trained policy to (default <dataset-repo>-<policy>)")
     ap.add_argument("--policy", choices=list(POLICY_ARGS), default="dit")
+    ap.add_argument("--exclude", default="",
+                    help="comma-separated episode indices to DROP (contaminated); needs --total")
+    ap.add_argument("--total", type=int, default=0,
+                    help="total #episodes in the Hub dataset (to build the keep-list for --exclude)")
     ap.add_argument("--gpu", default="NVIDIA GeForce RTX 4090", help="RunPod GPU type id")
     ap.add_argument("--cloud-type", choices=["COMMUNITY", "SECURE", "ALL"], default="COMMUNITY",
                     help="COMMUNITY has the most consumer-GPU (4090) capacity; SECURE is pricier/steadier")
@@ -122,6 +136,9 @@ def main():
             price = f"${od}/h" if od is not None else "no on-demand stock"
             print(f"{gid:34} {mem:>3}GB  community={comm}  secure={sec}  {price}")
         return
+
+    if not args.dataset_repo:
+        ap.error("--dataset-repo is required to launch a pod")
 
     pod = runpod.create_pod(
         name=f"pickplace-{args.policy}",

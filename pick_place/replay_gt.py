@@ -66,6 +66,7 @@ def capture_expert(env, controller, expert, rng, record_every):
         for t in range(mx):
             controller.step(data, cmd)
             mujoco.mj_step(model, data)
+            env.track()                          # lift height for env.success()
             if gtick % record_every == 0:
                 p, Rr = tcp_pose(model, data, info)
                 seq.append((p.copy(), Rr.copy(), float(grip)))
@@ -98,6 +99,7 @@ def replay(env, controller, actions, sim_per_decision, mode="measured"):
         for _ in range(sim_per_decision):
             controller.step(data, cmd)
             mujoco.mj_step(model, data)
+            env.track()                          # lift height for env.success()
         p, _ = tcp_pose(model, data, info)
         achieved.append(p.copy())
     return achieved

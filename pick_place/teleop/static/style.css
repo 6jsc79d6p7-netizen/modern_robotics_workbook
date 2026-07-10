@@ -32,6 +32,13 @@ main { padding: 8px 16px 40px; display: flex; flex-direction: column; gap: 12px;
 }
 #xrStats { font: 12px/1.3 -apple-system, system-ui, sans-serif; color: #7d8590;
            text-align: center; }
+/* wrist-cam feed: a big band above the controls. min-height:0 lets the flex
+   item shrink so the img never overflows; object-fit keeps the square undistorted. */
+#wristcam {
+  display: block; flex: 5; width: 100%; min-height: 0; object-fit: contain;
+  background: #000; border-radius: 12px;
+}
+#wristcam:not([src]) { display: none; }   /* hide until the stream is attached */
 .clutch {
   flex: 2; border: 0; border-radius: 16px; color: #fff;
   font: 800 26px -apple-system, system-ui, sans-serif; letter-spacing: 1px;

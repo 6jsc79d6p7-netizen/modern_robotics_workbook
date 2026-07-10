@@ -26,12 +26,13 @@ def _reached(model, data, info, pos, tol=0.012):
     return np.linalg.norm(p - np.asarray(pos, float)) < tol
 
 
-def _run_plan(model, data, info, controller, plan, recorder, record_every, gtick):
+def _run_plan(env, model, data, info, controller, plan, recorder, record_every, gtick):
     for pos, R, grip, mn, mx in plan:
         cmd = TargetCommand(pos=np.asarray(pos, float), R=R, gripper=grip)
         for t in range(mx):
             controller.step(data, cmd)
             mujoco.mj_step(model, data)
+            env.track()                       # accumulate lift height for success()
             if recorder and gtick[0] % record_every == 0:
                 recorder.record_step(data, grip)
             gtick[0] += 1
@@ -73,16 +74,21 @@ def main():
             controller.reset(data)
             if recorder:
                 recorder.start_episode(instruction)
-            _run_plan(model, data, info, controller, expert.plan(rng),
+            _run_plan(env, model, data, info, controller, expert.plan(rng),
                       recorder, record_every, gtick=[0])
             attempts += 1
-            ok = env.success()
+            # placed in the bin AND held cleanly the whole way (no empty grasp / no
+            # mid-carry drop-that-luckily-landed-in-bin). Both are needed for a clean
+            # demo; either alone let contamination through (see env.held_cleanly).
+            placed, clean = env.success(), env.held_cleanly()
+            ok = placed and clean
             if ok:
                 saved += 1
                 if recorder:
                     color, shape = env.env.obj_desc[env.target_obj]
                     recorder.save_episode(color, shape, env.env.bin_desc[env.target_bin],
-                                          source="script")
+                                          success=placed, grasp_verified=env.grasp_verified(),
+                                          held_cleanly=clean, source="script")
             elif recorder:
                 recorder.discard_episode()
             if attempts % 5 == 0 or ok:

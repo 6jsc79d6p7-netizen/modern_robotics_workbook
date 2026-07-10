@@ -83,6 +83,8 @@ async function startAR() {
     domOverlay: { root: $("overlay") },
   });
   $("overlay").style.display = "block";
+  // attach the wrist-cam MJPEG stream (cache-bust → a fresh connection each session)
+  $("wristcam").src = "/wrist.mjpg?t=" + Date.now();
 
   const glCanvas = document.createElement("canvas");
   const gl = glCanvas.getContext("webgl", { xrCompatible: true });
@@ -94,6 +96,7 @@ async function startAR() {
   xrSession.addEventListener("end", () => {
     xrSession = null; setClutch(false);
     $("overlay").style.display = "none";
+    $("wristcam").removeAttribute("src");     // close the MJPEG stream
     $("support").textContent = "AR session ended.";
   });
 

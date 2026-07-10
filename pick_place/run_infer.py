@@ -18,6 +18,8 @@ success the policy would just hover/drift (out-of-distribution).
 """
 import argparse
 import os
+import queue
+import threading
 
 import numpy as np
 import mujoco
@@ -37,12 +39,23 @@ DEFAULT_CKPT = "outputs/dit_flow_masked/checkpoints/last/pretrained_model"
 
 
 def load_policy(ckpt, device, n_action_steps=None, dataset_root=MASK_ROOT,
-                temporal_ensemble_coeff=None):
+                temporal_ensemble_coeff=None, noise_scheduler_type=None,
+                num_inference_steps=None):
     from lerobot.configs.policies import PreTrainedConfig
     from lerobot.policies.factory import make_policy, make_pre_post_processors
     cfg = PreTrainedConfig.from_pretrained(ckpt)
     cfg.pretrained_path = ckpt
     cfg.device = device
+    # diffusion-only: swap the *sampler* at inference (same weights, no retrain).
+    # DDIM ~10 steps (fast, deterministic); DDPM ~num_train_timesteps steps
+    # (slower, stochastic). Scheduler is built in the policy from cfg, so set here.
+    if noise_scheduler_type is not None and hasattr(cfg, "noise_scheduler_type"):
+        cfg.noise_scheduler_type = noise_scheduler_type
+    if num_inference_steps is not None and hasattr(cfg, "num_inference_steps"):
+        cfg.num_inference_steps = num_inference_steps
+    if noise_scheduler_type is not None:
+        print(f"[infer] sampler -> {noise_scheduler_type} "
+              f"({num_inference_steps or 'default'} steps)")
     # How many chunk actions to execute open-loop before re-observing. The DiT
     # trains with n_action_steps=24 (of a 32-horizon) — a LOT of blind motion for
     # a task that needs visual servoing. Lower it (~8) to re-look ~3x as often;
@@ -74,11 +87,14 @@ def load_policy(ckpt, device, n_action_steps=None, dataset_root=MASK_ROOT,
 
 
 def _state(model, data, info, finger_qadr):
+    # MUST match recorder._observe channel-for-channel (see recorder.STATE_NAMES):
+    # ee_pos, rot6d, gripper_width(measured), gripper_cmd(commanded ctrl), joints.
     p, R = tcp_pose(model, data, info)
     rot6d = R[:, :2].T.reshape(6)
     gw = float(sum(data.qpos[a] for a in finger_qadr))
+    gcmd = float(data.ctrl[info.gripper_act_id])          # commanded gripper (0..255)
     jp = data.qpos[info.arm_qpos_ids]
-    return np.concatenate([p, rot6d, [gw], jp]).astype(np.float32)
+    return np.concatenate([p, rot6d, [gw], [gcmd], jp]).astype(np.float32)
 
 
 def _images(renderer, seg_renderer, data, keep_geoms):
@@ -99,15 +115,44 @@ def _integrate(ee_p, ee_R, action):
     return ee_p + dpos, Rd @ ee_R, grip
 
 
+class _VideoRec:
+    """Capture a clean (unmasked) third-person render to an MP4 for a demo/README.
+    Frames grabbed every `stride` sim steps so playback at `fps` is ~real-time."""
+    def __init__(self, model, cam="scene", fps=30, w=640, h=480):
+        self.r = mujoco.Renderer(model, h, w)
+        self.cam, self.fps, self.w, self.h = cam, fps, w, h
+        self.stride = max(1, round((1.0 / fps) / model.opt.timestep))
+        self.frames, self.i = [], 0
+
+    def maybe(self, data):
+        if self.i % self.stride == 0:
+            self.r.update_scene(data, camera=self.cam)       # marker (group 4) hidden → clean
+            self.frames.append(self.r.render().copy())
+        self.i += 1
+
+    def save(self, path, won):
+        import cv2
+        out = path.replace(".mp4", f"_{'ok' if won else 'fail'}.mp4")
+        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+        vw = cv2.VideoWriter(out, cv2.VideoWriter_fourcc(*"mp4v"), self.fps, (self.w, self.h))
+        for f in self.frames:
+            vw.write(cv2.cvtColor(f, cv2.COLOR_RGB2BGR))      # mujoco RGB → cv2 BGR
+        vw.release()
+        print(f"[infer] saved {out}  ({len(self.frames)} frames @ {self.fps}fps)")
+
+
 def rollout(env, policy, pre, post, controller, renderer, seg_renderer, finger_qadr,
-            device, max_decisions=160, sim_per_decision=33, on_step=None):
+            device, max_decisions=160, sim_per_decision=33, on_step=None,
+            record_path=None, record_cam="scene"):
     model, data, info = env.model, env.data, env.info
     instruction = env.reset()
     keep = env.target_keep_geoms()                           # highlight target obj+bin
     controller.reset(data)
     policy.reset()
     ref_p, ref_R = tcp_pose(model, data, info)               # running target reference
+    rec = _VideoRec(model, record_cam) if record_path else None
     print(f"[infer] task: {instruction}")
+    won = False
     for k in range(max_decisions):
         obs = _images(renderer, seg_renderer, data, keep)
         obs["observation.state"] = torch.from_numpy(
@@ -129,13 +174,113 @@ def rollout(env, policy, pre, post, controller, renderer, seg_renderer, finger_q
         for _ in range(sim_per_decision):
             controller.step(data, cmd)
             mujoco.mj_step(model, data)
+            env.track()                        # lift height gates env.success() below
+            if rec is not None:
+                rec.maybe(data)
             if on_step:
                 on_step()
         if env.success():
             print(f"[infer] SUCCESS at decision {k}")
-            return True
-    print("[infer] timeout — not placed")
-    return False
+            won = True
+            break
+    if not won:
+        print("[infer] timeout — not placed")
+    if rec is not None:
+        rec.save(record_path, won)
+    return won
+
+
+def rollout_async(env, policy, pre, post, controller, renderer, seg_renderer, finger_qadr,
+                  device, max_decisions=160, sim_per_decision=33, lookahead=2, on_step=None,
+                  record_path=None, record_cam="scene"):
+    """Same rollout, but inference runs in a background thread so it OVERLAPS sim
+    stepping instead of freezing it (kills the move-stop-move stutter). A producer
+    thread calls select_action to fill a small action queue; the main thread renders
+    the latest obs, pops an action, and steps the sim. Torch inference and mj_step
+    both release the GIL, so they genuinely run in parallel.
+
+    `lookahead` = queue depth = how many actions the producer runs ahead. This is
+    the accuracy/smoothness knob: SMALL (1-3) keeps each chunk planned from a nearly
+    fresh observation (accuracy ≈ sync) and still hides most latency; LARGE runs a
+    whole chunk ahead, so chunks get planned from chunk-stale observations and the
+    policy overshoots the grasp. Default small on purpose.
+
+    NOTE: torch inference from a non-main thread is reliable on CPU; on MPS it usually
+    works but is less battle-tested — if it errors/hangs, drop --async-infer."""
+    model, data, info = env.model, env.data, env.info
+    instruction = env.reset()
+    keep = env.target_keep_geoms()
+    controller.reset(data)
+    policy.reset()
+    ref_p, ref_R = tcp_pose(model, data, info)
+    rec = _VideoRec(model, record_cam) if record_path else None
+    print(f"[infer] task: {instruction}  (async)")
+
+    def observe():
+        obs = _images(renderer, seg_renderer, data, keep)          # main thread only (GL ctx)
+        obs["observation.state"] = torch.from_numpy(_state(model, data, info, finger_qadr))[None]
+        obs["task"] = [instruction]
+        return obs
+
+    latest = {"obs": observe()}
+    lock = threading.Lock()
+    act_q = queue.Queue(maxsize=max(1, lookahead))    # small = fresh obs = accurate
+    stop = threading.Event()
+    err = {}
+
+    def producer():
+        try:
+            while not stop.is_set():
+                with lock:
+                    obs = latest["obs"]
+                with torch.no_grad():
+                    a = post(policy.select_action(pre(obs))).squeeze(0).detach().cpu().numpy()
+                while not stop.is_set():
+                    try:
+                        act_q.put(a, timeout=0.1); break
+                    except queue.Full:
+                        continue
+        except Exception as e:                       # surface, don't hang the main loop
+            err["e"] = e; stop.set()
+
+    worker = threading.Thread(target=producer, daemon=True)
+    worker.start()
+
+    won = False
+    try:
+        for k in range(max_decisions):
+            with lock:
+                latest["obs"] = observe()            # keep the producer's obs fresh
+            while True:                              # wait for an action (or producer death)
+                try:
+                    a = act_q.get(timeout=0.1); break
+                except queue.Empty:
+                    if stop.is_set():
+                        raise RuntimeError(f"inference thread died: {err.get('e')}")
+            tp, tR, grip = _integrate(ref_p, ref_R, a)
+            ref_p, ref_R = tp, tR
+            cmd = TargetCommand(pos=tp, R=tR, gripper=grip)
+            _update_marker(model, data, info, cmd)
+            for _ in range(sim_per_decision):
+                controller.step(data, cmd)
+                mujoco.mj_step(model, data)
+                env.track()
+                if rec is not None:
+                    rec.maybe(data)
+                if on_step:
+                    on_step()
+            if env.success():
+                print(f"[infer] SUCCESS at decision {k}")
+                won = True
+                break
+        else:
+            print("[infer] timeout — not placed")
+    finally:
+        stop.set()
+        worker.join(timeout=1.0)
+    if rec is not None:
+        rec.save(record_path, won)
+    return won
 
 
 def _snapshot(data):
@@ -217,6 +362,27 @@ def main():
                     help="ACT temporal ensembling coefficient (paper default 0.01). "
                          "Re-queries every decision and EMA-blends overlapping chunk "
                          "predictions; smoother/more accurate, no retraining. ACT only.")
+    ap.add_argument("--scheduler", choices=["DDPM", "DDIM"], default=None,
+                    help="diffusion only: override the inference sampler (same "
+                         "weights). Checkpoint default here is DDIM/10 steps.")
+    ap.add_argument("--num-inference-steps", type=int, default=None,
+                    help="diffusion denoising steps (DDIM ~10; DDPM ~100 = "
+                         "num_train_timesteps). Fewer = faster, rougher.")
+    ap.add_argument("--async-infer", action="store_true",
+                    help="run inference in a background thread so it overlaps sim "
+                         "stepping (removes the move-stop stutter of slow samplers). "
+                         "Reliable on CPU; usually works on MPS.")
+    ap.add_argument("--async-lookahead", type=int, default=2,
+                    help="async only: actions the producer runs ahead. Small (1-3) "
+                         "= fresher obs = accuracy≈sync; larger = smoother but the "
+                         "policy plans on staler obs and overshoots.")
+    ap.add_argument("--record", action="store_true",
+                    help="save a clean third-person MP4 per episode (for a README/demo); "
+                         "filename gets _ok/_fail so you can grab a successful one.")
+    ap.add_argument("--record-dir", default="outputs/infer_videos",
+                    help="where to write the recorded MP4s")
+    ap.add_argument("--record-cam", choices=["scene", "front", "wrist"], default="scene",
+                    help="camera to record (scene = elevated 3/4 view; unmasked)")
     ap.add_argument("--viz", choices=["live", "none"], default="live")
     ap.add_argument("--probe-language", action="store_true",
                     help="same scene, vary only the target highlight; report "
@@ -240,19 +406,25 @@ def main():
     print(f"[infer] loading {args.checkpoint} on {args.device} …")
     policy, pre, post = load_policy(args.checkpoint, args.device, args.n_action_steps,
                                     dataset_root=args.dataset_root,
-                                    temporal_ensemble_coeff=args.temporal_ensemble)
+                                    temporal_ensemble_coeff=args.temporal_ensemble,
+                                    noise_scheduler_type=args.scheduler,
+                                    num_inference_steps=args.num_inference_steps)
 
     if args.probe_language:
         probe_language(env, policy, pre, post, controller, renderer, seg_renderer,
                        finger_qadr)
         return
 
+    roll = rollout_async if args.async_infer else rollout
+    extra = {"lookahead": args.async_lookahead} if args.async_infer else {}
+
     def run_all(on_step=None):
         wins = 0
         for ep in range(args.episodes):
-            wins += rollout(env, policy, pre, post, controller, renderer, seg_renderer,
-                            finger_qadr, args.device, args.max_decisions,
-                            on_step=on_step)
+            rp = os.path.join(args.record_dir, f"ep{ep:02d}.mp4") if args.record else None
+            wins += roll(env, policy, pre, post, controller, renderer, seg_renderer,
+                         finger_qadr, args.device, args.max_decisions,
+                         on_step=on_step, record_path=rp, record_cam=args.record_cam, **extra)
         print(f"\n[infer] SUCCESS RATE: {wins}/{args.episodes}")
 
     if args.viz == "live":

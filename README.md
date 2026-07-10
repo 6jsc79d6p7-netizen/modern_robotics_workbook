@@ -7,6 +7,21 @@ Working through *Modern Robotics: Mechanics, Planning, and Control*
 - Per-topic workflow: run `/mr-topic <topic>` (theory → discussion → code).
 - See `CLAUDE.md` for the learning approach.
 
+## 🎬 Milestone — learned pick-and-place in sim
+
+First working policy from the practical build: a **Diffusion Policy** (vision +
+state, conv-U-Net, DDIM sampling) trained entirely in MuJoCo on **clean scripted +
+teleop demos**, doing a target-highlight-conditioned pick-and-place on a Franka.
+
+![Diffusion Policy pick-and-place](pick_place/media/dp_pickplace.gif)
+
+The arm grasps the highlighted object and drops it in the highlighted bin
+(grounding = a mask → SAM/Grounding-DINO on hardware). Diffusion reached **~60%**
+at its best checkpoint vs **~10%** for ACT on *identical* data — see
+[`pick_place/`](pick_place/) and the
+[iteration-loop note](notes/proj_iteration_loop.md) for how cleaning the data
+(removing empty-gripper "successes") made that comparison trustworthy.
+
 ## Progress
 
 | # | Chapter / Topic | Note | Notebook | Status |
@@ -32,9 +47,9 @@ Working through *Modern Robotics: Mechanics, Planning, and Control*
 | 8 | Dynamics of Open Chains | | | ✅ done |
 | 8a | ↳ Manipulator eqn, fwd/inv dynamics, Newton–Euler, contact, sim-vs-real model | [08a](notes/08a_open_chain_dynamics.md) | — (haptic teleop exercise) | ✅ done |
 | 8b | ↳ Applied: self-dynamics compensation (haptics) | [08b](notes/08b_self_dynamics_compensation.md) | — (design exercise) | ✅ done |
-| 9 | Trajectory Generation | [09](notes/09_trajectory_generation.md) | toys (planned) | 🟨 theory done |
-| 9–10 | ↳ Learned SOTA (combined) | [09_10s](notes/09_10_learned_sota.md) | toys (planned) | 🟨 theory done |
-| 10 | Motion Planning | [10](notes/10_motion_planning.md) | toys (planned) | 🟨 theory done |
+| 9 | Trajectory Generation | [09](notes/09_trajectory_generation.md) | [DP pick-place](pick_place/) 🎬 | ✅ done |
+| 9–10 | ↳ Learned SOTA (combined) | [09_10s](notes/09_10_learned_sota.md) | [DP pick-place](pick_place/) 🎬 | ✅ done |
+| 10 | Motion Planning | [10](notes/10_motion_planning.md) | [DP pick-place](pick_place/) 🎬 | ✅ done |
 | 11 | Robot Control | | | ⬜ not started |
 | 12 | Grasping & Manipulation | | | ⬜ not started |
 | 13 | Wheeled Mobile Robots | | | ⬜ not started |
@@ -43,8 +58,9 @@ Status legend: ⬜ not started · 🟨 in progress · ✅ done
 
 ## Up next
 
-**Ch. 9 & 10 — theory notes done; toy examples next.** Per CLAUDE.md these are
-*special handling* (gist + SOTA + toy). We taught **9 and 10's SOTA together**
+**Ch. 9 & 10 — done ✅** (theory + learned SOTA, and the "toy" realized as the
+**pick-place milestone above** — a working Diffusion Policy). Per CLAUDE.md these
+were *special handling* (gist + SOTA + toy). We taught **9 and 10's SOTA together**
 (user's call — the learned methods dissolve the Ch9/Ch10 boundary). Three notes:
 - [09](notes/09_trajectory_generation.md) — classical trajectory-gen gist (path ×
   time scaling; joint/task/SE(3) straight lines; cubic/quintic/trapezoid/S-curve

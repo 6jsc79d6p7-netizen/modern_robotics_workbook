@@ -32,8 +32,12 @@ DEFAULT_ROOT = os.path.join(HERE, "data", "pick_place")
 # 3-camera data stays intact). Point run_script/train/infer at this.
 MASK_ROOT = os.path.join(HERE, "data", "pick_place_masked")
 
+# gripper_width = MEASURED finger aperture; gripper_cmd = the COMMANDED gripper
+# (data.ctrl, 0=closed..255=open). The pair gives the policy a grasp/stall signal:
+# commanded-closed but width won't collapse ⇒ something is held. Both exist on real
+# hardware too (e.g. SO-100: present-position vs goal-position), so it transfers.
 STATE_NAMES = (["ee_x", "ee_y", "ee_z"] + [f"rot6d_{i}" for i in range(6)]
-               + ["gripper_width"] + [f"joint{i}" for i in range(1, 8)])
+               + ["gripper_width", "gripper_cmd"] + [f"joint{i}" for i in range(1, 8)])
 ACTION_NAMES = ["dx", "dy", "dz", "drx", "dry", "drz", "gripper"]
 
 
@@ -102,20 +106,28 @@ class Recorder:
         self._pending = (obs, pose, float(gripper_cmd))
 
     def save_episode(self, target_color, target_shape, target_bin, success=True,
-                     source="script"):
+                     grasp_verified=None, held_cleanly=None, source="script"):
         """Finalize the current episode (drops the last, action-less frame).
-        `source` ('script' | 'teleop') is logged to the sidecar for co-training."""
+        `source` ('script' | 'teleop') is logged to the sidecar for co-training.
+        `success` is the REAL env.success() result (not a hardcoded True);
+        `grasp_verified` records whether the target was picked up; `held_cleanly`
+        whether it was held the whole way (no empty grasp / mid-carry drop) — so a
+        recurrence of the empty-gripper-placement bug is auditable from the meta."""
         if self._n < 2:
             self.discard_episode()
             return False
         self._pending = None
         idx = self.ds.num_episodes
         self.ds.save_episode(parallel_encoding=False)   # synchronous: files flushed
+        meta = {"episode_index": idx, "source": source,
+                "target_color": target_color, "target_shape": target_shape,
+                "target_bin": target_bin, "success": bool(success)}
+        if grasp_verified is not None:
+            meta["grasp_verified"] = bool(grasp_verified)
+        if held_cleanly is not None:
+            meta["held_cleanly"] = bool(held_cleanly)
         with open(self._meta_path, "a") as f:
-            f.write(json.dumps({"episode_index": idx, "source": source,
-                                "target_color": target_color,
-                                "target_shape": target_shape, "target_bin": target_bin,
-                                "success": success}) + "\n")
+            f.write(json.dumps(meta) + "\n")
         print(f"[rec] saved episode {idx}  ({self._n} frames)")
         return True
 
@@ -134,8 +146,10 @@ class Recorder:
         p, R = tcp_pose(self.model, data, self.info)
         rot6d = R[:, :2].T.reshape(6)                        # 6D rotation rep
         gw = float(sum(data.qpos[a] for a in self.finger_qadr))
+        gcmd = float(data.ctrl[self.info.gripper_act_id])     # commanded gripper (0..255)
         jp = data.qpos[self.info.arm_qpos_ids]
-        obs["observation.state"] = np.concatenate([p, rot6d, [gw], jp]).astype(np.float32)
+        obs["observation.state"] = np.concatenate(
+            [p, rot6d, [gw], [gcmd], jp]).astype(np.float32)
         return obs, (p, R)
 
     def _delta(self, pose0, pose1, gripper):
