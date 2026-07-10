@@ -74,17 +74,21 @@ were *special handling* (gist + SOTA + toy). We taught **9 and 10's SOTA togethe
   branch, and what MR substrate survives underneath (this is the Phase-0→robot-
   learning bridge).
 
-**PIVOT — now building the practical project, not toy examples.** Ch 9–10 theory
-(+ rich FAQ) is done; **Ch 11/12/13 are deferred.** Next is a real
-**MuJoCo pick-and-place build** toward the north star (roadmap M1→M2→M3): scripted
-privileged-state expert **+ human teleop** demos → conditioned **flow-matching**
-policy (Rung 4) → **π0** (Rung 5). Decisions: **Franka Panda**, **cloud GPU** for
-the CUDA parts (cuRobo/AnyGrasp/training/π0 — none run on the Mac), **phased**
-(env + data on the Mac first), and a **walled-bin planning challenge** in the place
-phase. First concrete piece: the **phone 6-DoF teleop** data interface —
-[`proj_phone_teleop.md`](notes/proj_phone_teleop.md) (also the best hands-on Ch-3
-SE(3)/transform-tree exercise). NB: rebuilding `.venv` dropped MuJoCo — reinstall
-`mujoco` + `mujoco_menagerie` when Phase 0 starts.
+**PIVOT — the practical build is up and working.** The **MuJoCo pick-and-place
+build** is running toward the north star (roadmap M1→M2→M3), and Ch 9–10's learned
+SOTA is now *realized*, not just read. **Done:** a **Franka Panda** env with
+**phone 6-DoF teleop** ([`proj_phone_teleop.md`](notes/proj_phone_teleop.md),
+also the best hands-on Ch-3 SE(3)/transform-tree exercise), including a
+**walled-bin place challenge**; a **scripted privileged-state expert + human
+teleop** demo pipeline feeding a **cleaned dataset** (after catching empty-gripper
+"successes" — see the [iteration-loop note](notes/proj_iteration_loop.md)); and two
+policies trained on *identical* clean data — **ACT** (~10%) vs a **Diffusion
+Policy** (~60%, the milestone above; sampling beats ACT's mode-averaging on the
+multimodal grasp). **Next:** a **DiT / flow-matching** run (Rung 4) for a
+three-way comparison, then **π0** (Rung 5), more teleop data to push past the
+overfitting wall, and **real hardware** (SO-100). CUDA parts
+(training/π0/cuRobo/AnyGrasp) run on **cloud GPU**; the Mac does env, teleop, and
+eval. **Ch 11/12/13 Up Next**
 
 > **Ch. 8 — complete** (Tier-2, conceptual; Lagrangian derivations skipped). Notes
 > 8a (core) + 8b (applied). 8a covers the manipulator equation `τ = M(θ)θ̈ +
