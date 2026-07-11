@@ -50,7 +50,9 @@ at its best checkpoint vs **~10%** for ACT on *identical* data — see
 | 9 | Trajectory Generation | [09](notes/09_trajectory_generation.md) | [DP pick-place](pick_place/) 🎬 | ✅ done |
 | 9–10 | ↳ Learned SOTA (combined) | [09_10s](notes/09_10_learned_sota.md) | [DP pick-place](pick_place/) 🎬 | ✅ done |
 | 10 | Motion Planning | [10](notes/10_motion_planning.md) | [DP pick-place](pick_place/) 🎬 | ✅ done |
-| 11 | Robot Control | | | ⬜ not started |
+| 11 | Robot Control | | | ✅ done |
+| 11a | ↳ Control fundamentals, PID, position/velocity/torque, computed torque | [11a](notes/11a_control_fundamentals.md) | — (build-focused) | ✅ done |
+| 11b | ↳ Force / hybrid / impedance / admittance control (contact-rich) | [11b](notes/11b_impedance_force_control.md) | [CartesianImpedanceController](pick_place/cartesian_controller.py) | ✅ done |
 | 12 | Grasping & Manipulation | | | ⬜ not started |
 | 13 | Wheeled Mobile Robots | | | ⬜ not started |
 

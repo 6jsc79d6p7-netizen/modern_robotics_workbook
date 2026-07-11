@@ -29,6 +29,7 @@ import torch
 from mr.so3 import matrix_exp3
 from .env import PickPlaceEnv, CAMERAS, render_obs, OBJECTS, BINS
 from .controller import EEController
+from .cartesian_controller import CartesianImpedanceController
 from .scene import tcp_pose
 from .target_source import TargetCommand
 from .dataset import load_dataset
@@ -608,11 +609,24 @@ def main():
                     help="dataset root for feature shapes + norm stats (must match "
                          "the one the checkpoint was trained on)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--controller", choices=["position", "impedance"], default="position",
+                    help="position = stiff IK→servo EEController (default); "
+                         "impedance = compliant Cartesian torque controller (11b)")
+    ap.add_argument("--imp-kp-pos", type=float, default=600.0,
+                    help="impedance translational stiffness (N/m); lower = softer on contact")
+    ap.add_argument("--imp-kp-rot", type=float, default=30.0,
+                    help="impedance rotational stiffness (N·m/rad)")
     args = ap.parse_args()
 
     env = PickPlaceEnv(seed=args.seed)
     model, info = env.model, env.info
-    controller = EEController(model, info)
+    if args.controller == "impedance":
+        controller = CartesianImpedanceController(
+            model, info, kp_pos=args.imp_kp_pos, kp_rot=args.imp_kp_rot)
+        print(f"[infer] controller=impedance  kp_pos={args.imp_kp_pos} kp_rot={args.imp_kp_rot}")
+    else:
+        controller = EEController(model, info)
+        print("[infer] controller=position (stiff)")
     fj = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, n)
           for n in ("finger_joint1", "finger_joint2")]
     finger_qadr = [model.jnt_qposadr[j] for j in fj if j >= 0]

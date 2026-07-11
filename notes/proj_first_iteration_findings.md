@@ -134,5 +134,8 @@ quality.
 5. A/B absolute-in-base vs delta action space.
 6. Only then: model/recipe tuning (EMA, longer DiT training, image aug, narrower UNet).
 
-Model choice (DP vs flow) stops mattering once 1–5 are done — which is the sign
+Model choice (DP vs flow) stops mattering once 1–5 are done — which is the sign. 
 the bottleneck has moved off our pipeline and onto the frontier, where it belongs.
+
+Generate 50 teleop episode dataset - create 4 from same examples on 2 axis - abs vs delta. Illumination vs Non Illumination (for VLA-JEPA or multistep DIT)
+Try VLA-JEPA without illumination trick - unique architecture well suited for few shot training.
