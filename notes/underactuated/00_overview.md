@@ -2,7 +2,7 @@
 
 The next book/course after *Modern Robotics*: **MIT 6.832 "Underactuated
 Robotics"** by **Russ Tedrake**. Free online text + lectures:
-<https://underactuated.mit.edu> (uses **Drake** / `pydrake` for examples).
+<https://underactuated.csail.mit.edu/index.html> (uses **Drake** / `pydrake` for examples).
 
 This note is the launchpad; per-topic notes will live alongside it in this folder
 (`notes/underactuated/`), each intuition-first with a `figures/` subfolder, same
@@ -68,7 +68,7 @@ learning-theory foundation the VLA/diffusion/RL stack rests on.
 **Learning:**
 11. Reinforcement learning (policy gradient, actor-critic) grounded in dynamics.
 
-*(Numbering is approximate — align with <https://underactuated.mit.edu> when we
+*(Numbering is approximate — align with <https://underactuated.csail.mit.edu/index.html> when we
 start module 1.)*
 
 ## Tooling

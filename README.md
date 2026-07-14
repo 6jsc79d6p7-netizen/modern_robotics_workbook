@@ -5,8 +5,8 @@ toward **deep-learning robotics** (language-conditioned manipulation + semantic
 nav on a wheeled mobile manipulator). Notes lead with geometry and worked
 examples; code is from-scratch first, then cross-checked.
 
-- **[Modern Robotics](notes/modern_robotics/)** (Lynch & Park) — ✅ **complete** (all 13 chapters).
-- **[Underactuated Robotics](notes/underactuated/)** (MIT 6.832, Russ Tedrake) — 🟨 **up next**.
+- **[Modern Robotics](notes/modern_robotics/)** (Lynch & Park — [book PDF](https://hades.mech.northwestern.edu/images/7/7f/MR.pdf)) — ✅ **complete** (all 13 chapters).
+- **[Underactuated Robotics](notes/underactuated/)** (MIT 6.832, Russ Tedrake — [online text](https://underactuated.csail.mit.edu/index.html)) — 🟨 **up next**.
 - Notes live in **book-wise folders** under `notes/` (`modern_robotics/`,
   `underactuated/`, each with its own `figures/`). Cross-cutting build notes
   (`proj_*.md`) and the project `00_roadmap.md` stay at `notes/` root.
