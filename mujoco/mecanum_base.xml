@@ -1,0 +1,74 @@
+<mujoco model="mecanum_base">
+  <!-- A 4-mecanum-wheel omnidirectional base, used to visualize Chapter 13:
+         - forward kinematics  u = H(0) V_b   (wheel speeds from a body twist)
+         - odometry            V_b = F Delta-theta,  F = H^+  (pseudoinverse)
+       The base is driven KINEMATICALLY: we integrate the commanded body twist
+       (the Ch 3b screw exponential = odometry step 2) and set qpos directly.
+       MuJoCo is the 3D viewer; no contact/dynamics are simulated.
+
+       Two chassis:
+         "root"  = ground-truth base (opaque), with 4 spinning wheels
+         "ghost" = odometry ESTIMATE (translucent), drifts under wheel slip
+       Geometry (matches mecanum_kinematics.py):  L=0.30, W=0.20, r=0.05. -->
+  <option gravity="0 0 0" timestep="0.01"/>
+
+  <visual>
+    <global offwidth="1000" offheight="760"/>
+    <headlight ambient="0.45 0.45 0.45" diffuse="0.6 0.6 0.6"/>
+    <scale framelength="0.5" framewidth="0.02"/>
+  </visual>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.9 0.9 0.9" rgb2="0.75 0.78 0.82"
+             width="300" height="300"/>
+    <material name="grid" texture="grid" texrepeat="16 16" reflectance="0.1"/>
+  </asset>
+
+  <worldbody>
+    <light pos="1 -1 2.5" dir="-0.3 0.3 -1"/>
+    <geom name="floor" type="plane" size="6 6 0.1" material="grid"/>
+
+    <!-- world/space frame {s} at the origin -->
+    <site name="world" pos="0 0 0.001" size="0.02" rgba="1 1 1 0.4"/>
+
+    <!-- ===================== GROUND-TRUTH BASE ===================== -->
+    <body name="root" pos="0 0 0.05">
+      <freejoint name="root"/>
+      <site name="b" pos="0 0 0" size="0.02" rgba="1 1 1 0.6"/>
+      <!-- chassis -->
+      <geom type="box" size="0.30 0.20 0.04" rgba="0.20 0.45 0.80 1"/>
+      <!-- forward (+x) marker so heading is visible -->
+      <geom type="box" pos="0.28 0 0.045" size="0.04 0.06 0.01" rgba="1 0.85 0.1 1"/>
+
+      <!-- four mecanum wheels: spin about body-y axle; positions (+-L, +-W) -->
+      <body name="w1" pos="0.30 0.20 0">
+        <joint name="w1" type="hinge" axis="0 1 0"/>
+        <geom type="cylinder" fromto="0 -0.03 0 0 0.03 0" size="0.05" rgba="0.15 0.15 0.15 1"/>
+        <geom type="box" pos="0.035 0.031 0" size="0.012 0.004 0.004" rgba="1 0.3 0.3 1"/>
+      </body>
+      <body name="w2" pos="0.30 -0.20 0">
+        <joint name="w2" type="hinge" axis="0 1 0"/>
+        <geom type="cylinder" fromto="0 -0.03 0 0 0.03 0" size="0.05" rgba="0.15 0.15 0.15 1"/>
+        <geom type="box" pos="0.035 -0.031 0" size="0.012 0.004 0.004" rgba="1 0.3 0.3 1"/>
+      </body>
+      <body name="w3" pos="-0.30 0.20 0">
+        <joint name="w3" type="hinge" axis="0 1 0"/>
+        <geom type="cylinder" fromto="0 -0.03 0 0 0.03 0" size="0.05" rgba="0.15 0.15 0.15 1"/>
+        <geom type="box" pos="0.035 0.031 0" size="0.012 0.004 0.004" rgba="1 0.3 0.3 1"/>
+      </body>
+      <body name="w4" pos="-0.30 -0.20 0">
+        <joint name="w4" type="hinge" axis="0 1 0"/>
+        <geom type="cylinder" fromto="0 -0.03 0 0 0.03 0" size="0.05" rgba="0.15 0.15 0.15 1"/>
+        <geom type="box" pos="0.035 -0.031 0" size="0.012 0.004 0.004" rgba="1 0.3 0.3 1"/>
+      </body>
+    </body>
+
+    <!-- ===================== ODOMETRY ESTIMATE (ghost) ===================== -->
+    <body name="ghost" pos="0 0 0.05">
+      <freejoint name="ghost"/>
+      <site name="be" pos="0 0 0" size="0.02" rgba="1 0.6 0.1 0.7"/>
+      <geom type="box" size="0.30 0.20 0.04" rgba="0.95 0.55 0.10 0.35" contype="0" conaffinity="0"/>
+      <geom type="box" pos="0.28 0 0.045" size="0.04 0.06 0.01" rgba="1 0.85 0.1 0.4" contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+</mujoco>

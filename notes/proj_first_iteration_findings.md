@@ -137,5 +137,5 @@ quality.
 Model choice (DP vs flow) stops mattering once 1–5 are done — which is the sign. 
 the bottleneck has moved off our pipeline and onto the frontier, where it belongs.
 
-Generate 50 teleop episode dataset - create 4 from same examples on 2 axis - abs vs delta. Illumination vs Non Illumination (for VLA-JEPA or multistep DIT)
+Generate 50 teleop episode dataset (gated - remove very short and long running episodes in before training) - create 4 dataset from same examples on 2 axis - abs vs delta. Illumination vs Non Illumination (for VLA-JEPA or multistep DIT)
 Try VLA-JEPA without illumination trick - unique architecture well suited for few shot training.

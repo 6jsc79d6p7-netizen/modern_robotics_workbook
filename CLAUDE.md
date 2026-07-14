@@ -83,7 +83,7 @@ replacements for Ch 9/10/12).
 
 The repeatable per-topic workflow lives in the `/mr-topic` skill. In short:
 
-1. **Theory note** — I write `notes/NN_topic.md`: intuition-first explanation,
+1. **Theory note** — I write `notes/<book>/NN_topic.md`: intuition-first explanation,
    minimal/no derivations, pictures-in-words, the key formulas with *what each
    symbol means and why*, and a short "linear algebra you need here" aside.
 2. **Discussion** — we talk it through. I check understanding, the user asks
@@ -116,7 +116,7 @@ one genuinely distinct concept.
 When a note introduces a new matrix/object whose physical meaning isn't
 obvious from symbols alone (e.g. "what does this rotation matrix *look like*
 as two frames in space?"), generate a small matplotlib figure during the
-theory step and embed it in the note (`notes/figures/NN_description.png`,
+theory step and embed it in the note (`notes/<book>/figures/NN_description.png`,
 generator script alongside it). Don't wait for the notebook — a picture in the
 theory note is often what makes a matrix click. The 90°-rotation frame diagram
 and the `ω × p` cross-product diagram for 3a are good templates to follow.
@@ -127,7 +127,7 @@ gaps or produced a useful generalization (e.g. "is `det=1` enough for a
 rotation?", "what does `[ω_s]R = R[ω_b]` mean?"), add a short **FAQ section**
 to the theory note summarizing the question and the resolved answer, with
 pointers back to the relevant section. This makes the note self-contained for
-spaced review later — see `notes/03a_rotations.md` §8 for the pattern.
+spaced review later — see `notes/modern_robotics/03a_rotations.md` §8 for the pattern.
 
 ## Writing guidelines (important)
 
@@ -149,19 +149,28 @@ spaced review later — see `notes/03a_rotations.md` §8 for the pattern.
 ## Structure
 
 ```
-modern_robotics/
-├── MR.pdf                  # the textbook
+modern_robotics/                 # repo root (name predates the pivot to multi-book)
+├── MR.pdf                  # the Modern Robotics textbook
 ├── CLAUDE.md               # this file
-├── README.md               # progress tracker / index
-├── notes/                  # NN_topic.md — theory & intuition, one per topic
-│   └── figures/            # generated PNGs + gen_NN_*.py scripts for notes
+├── README.md               # progress tracker / index (multi-book)
+├── notes/                  # BOOK-WISE folders, one per course:
+│   ├── modern_robotics/    #   ✅ MR notes NN_topic.md + its own figures/
+│   │   └── figures/        #     generated PNGs + gen_NN_*.py scripts
+│   ├── underactuated/      #   🟨 next course (MIT 6.832) + its own figures/
+│   ├── 00_roadmap.md       #   project-level roadmap (stays at root)
+│   └── proj_*.md           #   cross-cutting practical-build notes (stay at root)
 ├── notebooks/              # NN_topic.ipynb — code, from-scratch + viz
+├── mujoco/                 # hands-on simulator experiments
+├── pick_place/             # the practical DL pick-place build
 ├── mr/                     # shared python helpers we build up as we go
 ├── .venv/                  # project virtualenv (see Environment notes)
 └── .claude/skills/mr-topic # the per-topic workflow skill
 ```
 
-Numbering `NN` follows the book's chapters (see README).
+Notes are organized **book-wise**: each course gets `notes/<book>/` with its own
+`figures/` subfolder. Numbering `NN` follows that book's chapters (see README).
+`00_roadmap.md` and the `proj_*.md` build notes are cross-cutting and stay at
+`notes/` root.
 
 ## Environment notes
 
